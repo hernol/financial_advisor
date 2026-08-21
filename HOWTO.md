@@ -196,7 +196,62 @@ A mano:
 .venv/bin/python financial_analyzer.py check-alerts
 ```
 
-Automático, con cron en el host (`crontab -e`):
+### Automático con systemd (recomendado)
+
+Hay un script que deja todo armado:
+
+```bash
+./scripts/setup-systemd.sh
+```
+
+Instala dos units en `~/.config/systemd/user/`: `fa-alerts.service` (corre
+`docker compose run --rm -T alerts` una vez) y `fa-alerts.timer` (lo dispara según
+el horario). No queda ningún daemon residente: el timer duerme, levanta un
+container efímero, notifica y muere. Por eso `ps` no muestra nada — para ver si
+está vivo se usa `systemctl --user list-timers`.
+
+Antes de escribir nada verifica que existan systemd `--user`, Docker con Compose
+v2, el daemon accesible y el `compose.yaml`; avisa (sin abortar) si falta el
+`.env` o si `linger` está apagado.
+
+Horario por defecto: `Mon-Fri 10..18:00:00`, o sea cada hora en días hábiles.
+Está pensado para **America/Argentina/Buenos_Aires (-03)**, donde ese rango cubre
+el mercado US tanto en EDT (10:30–17:00 local) como en EST (11:30–18:00 local).
+`OnCalendar` usa la hora local de la máquina, así que en otra zona horaria hay que
+ajustarlo:
+
+```bash
+./scripts/setup-systemd.sh --schedule "Mon-Fri *:0/30"   # cada 30 min
+./scripts/setup-systemd.sh --schedule "hourly"           # cada hora, todos los días
+./scripts/setup-systemd.sh --schedule "Mon-Fri 9..17:00:00"
+./scripts/setup-systemd.sh --no-test                     # sin corrida de prueba
+./scripts/setup-systemd.sh --uninstall                   # sacar el timer
+```
+
+Ventajas sobre cron: `Persistent=true` recupera la corrida si la máquina estaba
+suspendida a esa hora (cron simplemente la pierde), los logs van al journal en vez
+de a un archivo que crece sin límite, y `WorkingDirectory` hace que Compose
+encuentre `compose.yaml` y `.env` sin trucos.
+
+Dos cosas que el script no puede resolver solo:
+
+```bash
+sudo loginctl enable-linger $USER   # si no, el timer se apaga al cerrar sesión
+sudo usermod -aG docker $USER       # si el daemon no es accesible (requiere relogin)
+```
+
+Operación:
+
+```bash
+journalctl --user -u fa-alerts.service -n 50 --no-pager   # últimas corridas
+journalctl --user -u fa-alerts.service -f                 # seguir en vivo
+systemctl --user list-timers fa-alerts.timer              # próxima corrida
+systemctl --user start fa-alerts.service                  # forzar una corrida
+```
+
+### Automático con cron
+
+Si no tenés systemd (`crontab -e`):
 
 ```cron
 # cada 30 min en horario de mercado NY, lun-vie
