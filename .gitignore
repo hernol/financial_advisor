@@ -1,0 +1,55 @@
+# --- Secrets ---------------------------------------------------------------
+# .env holds GEMINI_API_KEY, ALPHA_VANTAGE_API_KEY, FINNHUB_API_KEY and the
+# Telegram tokens. Never commit it; .env.example documents the variables.
+.env
+.env.*
+!.env.example
+
+# --- Runtime data ----------------------------------------------------------
+# SQLite database (positions, alerts, analyses) plus its WAL sidecars, and the
+# alert log. All of it is per-machine state, not source.
+data/*
+!data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+alerts.log
+*.log
+
+# --- Python ----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# --- Test & lint caches ----------------------------------------------------
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+
+# --- Editors & OS ----------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# --- Claude Code -----------------------------------------------------------
+# Local, machine-specific permissions; the shared .claude/settings.json (if it
+# is ever added) stays tracked.
+.claude/settings.local.json
