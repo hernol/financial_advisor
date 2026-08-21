@@ -1,0 +1,9 @@
+# Runtime
+pandas>=2.2
+yfinance>=0.2.40          # primary market data source (no API key needed)
+google-genai>=1.0         # AI strategic report (GEMINI_API_KEY)
+# Alpha Vantage and Finnhub fallbacks use the standard library only.
+
+# Development
+pytest>=8.0
+pytest-cov>=5.0
