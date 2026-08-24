@@ -414,7 +414,14 @@ Agregar a inicio). Queda como una app más, a pantalla completa.
 
 ### Qué muestra
 
-La pantalla de un ticker, con tres pestañas:
+Dos secciones en la barra inferior.
+
+**Cartera** — el valor total con su P&L, la curva de equity, cada tenencia con su peso en
+la cartera y el libro mayor de movimientos. Las tenencias salen del ledger, así que el
+costo es el promedio real de todas tus compras y el P&L realizado incluye lo que ya
+vendiste.
+
+**Tickers** — la pantalla de un papel, con tres pestañas:
 
 | Pestaña | Contenido |
 |---|---|
@@ -422,12 +429,17 @@ La pantalla de un ticker, con tres pestañas:
 | **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
 | **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
 
+Los precios son **el último cierre guardado**, no una cotización en vivo: la pantalla no
+sale a pedir datos. Si una posición no tiene velas guardadas, la app avisa que quedó
+afuera del total en vez de valuarla en cero.
+
 El indicador del encabezado dice hace cuánto corrió el último chequeo. Si dice `sin
 corridas` o se pone amarillo, los números que estás viendo son viejos: eso es más
 importante que los números mismos.
 
-La pestaña *Indicador* arranca vacía en una instalación nueva. Cada corrida de
-`check-alerts` agrega un punto; después de unos días hay serie para mirar.
+La pestaña *Indicador* y la curva de equity arrancan vacías en una instalación nueva.
+Cada corrida de `check-alerts` agrega un punto a las dos; después de unos días hay serie
+para mirar.
 
 ## 7. Análisis
 

@@ -29,6 +29,17 @@
           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
   </symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v1"/>
+    <path d="M3 7.5V17a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/>
+    <path d="M21 10h-4a2.5 2.5 0 0 0 0 5h4z"/>
+  </symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 19V5"/><path d="M4 19h16"/>
+    <path d="M8 16v-5"/><path d="M13 16V8"/><path d="M18 16v-3"/>
+  </symbol>
 </svg>
 
 <header class="top">
@@ -44,7 +55,38 @@
 
 <main id="main">
 
-  <section id="view-list" class="view" aria-label="Tickers seguidos">
+  <section id="view-portfolio" class="view" aria-label="Cartera" hidden>
+    <div class="head">
+      <p class="kicker">Valor de cartera</p>
+      <div class="head-price">
+        <span id="p-value" class="big tnum">—</span>
+        <span id="p-delta" class="delta tnum"></span>
+      </div>
+      <p id="p-basis" class="coverage"></p>
+    </div>
+
+    <div id="p-unpriced" class="notice warn" hidden></div>
+
+    <div id="p-curve-box">
+      <div id="p-curve" class="chart"></div>
+      <div class="legend" id="p-curve-legend"></div>
+    </div>
+
+    <dl id="p-totals" class="stats"></dl>
+
+    <h2 class="section-h">Tenencias</h2>
+    <ul id="holding-list" class="cards"></ul>
+
+    <h2 class="section-h">Movimientos</h2>
+    <ul id="tx-list" class="cards"></ul>
+
+    <p id="p-empty" class="notice" hidden>
+      No hay posiciones cargadas. Registrá una compra con
+      <code>add-position</code> y aparece acá.
+    </p>
+  </section>
+
+  <section id="view-list" class="view" aria-label="Tickers seguidos" hidden>
     <ul id="ticker-list" class="cards grid2"></ul>
     <p id="list-empty" class="notice" hidden>
       Todavía no hay nada seguido. Cargá una posición o una alerta desde la
@@ -95,6 +137,17 @@
   </section>
 
 </main>
+
+<nav class="bottom" aria-label="Secciones">
+  <button class="nav-item" data-view="portfolio" aria-current="page">
+    <svg aria-hidden="true"><use href="#i-wallet"/></svg>
+    <span>Cartera</span>
+  </button>
+  <button class="nav-item" data-view="tickers">
+    <svg aria-hidden="true"><use href="#i-chart"/></svg>
+    <span>Tickers</span>
+  </button>
+</nav>
 
 <p id="error" class="toast" role="alert" hidden></p>
 

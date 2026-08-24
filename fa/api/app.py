@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from fa.api import tickers
+from fa.api import portfolio, tickers
 from fa.api.deps import close_database, open_database
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,7 @@ def create_app(*, serve_web: bool = True) -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(tickers.router)
+    app.include_router(portfolio.router)
 
     if serve_web and WEB_ROOT.is_dir():
         app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")

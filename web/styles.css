@@ -60,7 +60,8 @@ body {
   line-height: 1.5;
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
-  padding-bottom: calc(var(--s5) + var(--safe-b));
+  /* room for the bottom bar plus the home indicator */
+  padding-bottom: calc(64px + var(--s5) + var(--safe-b));
 }
 
 :focus-visible {
@@ -463,3 +464,118 @@ select:hover { border-color: var(--border); }
 /* uPlot theming */
 .u-select { background: color-mix(in srgb, var(--accent) 20%, transparent); }
 .u-cursor-x, .u-cursor-y { border-color: var(--border) !important; }
+
+
+/* --- bottom navigation ---------------------------------------------------- */
+/* Two destinations today, room for five. Above that a bar stops being a map
+   and starts being a menu. */
+
+.bottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 10;
+  display: flex;
+  gap: var(--s1);
+  padding: var(--s2) var(--s2) calc(var(--s2) + var(--safe-b));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid var(--border-soft);
+}
+
+.nav-item {
+  flex: 1;
+  min-height: var(--tap);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: var(--s1);
+  background: none;
+  border: none;
+  border-radius: var(--r2);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: .68rem;
+  font-weight: 500;
+  letter-spacing: .02em;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.nav-item svg { width: 21px; height: 21px; }
+.nav-item:hover { color: var(--fg-muted); }
+.nav-item[aria-current="page"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+@media (min-width: 768px) {
+  .bottom { max-width: 22rem; margin: 0 auto var(--s4); border-radius: var(--r3); border: 1px solid var(--border-soft); }
+}
+
+/* --- portfolio ------------------------------------------------------------ */
+
+.kicker {
+  margin: 0 0 var(--s1);
+  font-size: .66rem;
+  font-weight: 600;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+
+.notice.warn { border-color: var(--warn); color: var(--warn); }
+
+/* A holding row carries its own weight bar: the allocation is the thing you
+   scan for, and a number alone does not show concentration. */
+.holding {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r3);
+  padding: var(--s3) var(--s4);
+  display: grid;
+  gap: var(--s2);
+  cursor: pointer;
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.holding:hover { border-color: var(--border); background: #101529; }
+.holding:active { background: var(--muted); }
+
+.holding .qty { font-family: var(--f-mono); font-size: .76rem; color: var(--fg-dim); }
+.holding .value { font-family: var(--f-mono); font-size: 1.05rem; font-weight: 500; }
+.holding .pnl { font-family: var(--f-mono); font-size: .8rem; font-weight: 500; }
+.holding .pnl.up { color: var(--up); }
+.holding .pnl.down { color: var(--down); }
+
+.weight {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--s3);
+}
+.weight-bar { height: 4px; background: var(--muted); border-radius: 2px; overflow: hidden; }
+.weight-bar i { display: block; height: 100%; background: var(--accent); opacity: .75; border-radius: 2px; }
+.weight-pct { font-family: var(--f-mono); font-size: .7rem; color: var(--fg-dim); min-width: 3.2em; text-align: right; }
+
+/* --- ledger rows ---------------------------------------------------------- */
+
+.tx {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--border-soft);
+  border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+  display: grid;
+  gap: 2px;
+}
+.tx.buy { border-left-color: var(--up); }
+.tx.sell { border-left-color: var(--down); }
+.tx.dividend { border-left-color: var(--accent); }
+.tx.split { border-left-color: var(--warn); }
+.tx.fee { border-left-color: var(--fg-dim); }
+
+.tx-top { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); }
+.tx-kind { font-family: var(--f-mono); font-size: .8rem; font-weight: 500; }
+.tx-cash { font-family: var(--f-mono); font-size: .84rem; }
+.tx-cash.in { color: var(--up); }
+.tx-cash.out { color: var(--fg-muted); }
+.tx-sub { font-family: var(--f-mono); font-size: .7rem; color: var(--fg-dim); display: flex; gap: var(--s3); flex-wrap: wrap; }

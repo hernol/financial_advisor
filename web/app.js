@@ -17,7 +17,7 @@ async function api(path) {
   return response.json();
 }
 
-const state = { ticker: null, days: 252, series: 'rsi', charts: {} };
+const state = { view: 'portfolio', ticker: null, days: 252, series: 'rsi', charts: {} };
 
 const RANGES = [
   { label: '1M', days: 22 },
@@ -140,11 +140,12 @@ async function loadList() {
 
 async function showDetail(ticker) {
   state.ticker = ticker;
+  $('view-portfolio').hidden = true;
   $('view-list').hidden = true;
   $('view-detail').hidden = false;
   $('back').hidden = false;
   $('title').textContent = ticker;
-  location.hash = ticker;
+  if (location.hash !== `#/t/${ticker}`) location.hash = `#/t/${ticker}`;
   pickTab('chart');
 
   try {
@@ -407,6 +408,182 @@ async function loadAlerts() {
   }
 }
 
+
+// --- cartera ----------------------------------------------------------------
+
+const KIND_LABEL = {
+  buy: 'compra', sell: 'venta', dividend: 'dividendo', split: 'split', fee: 'comisión',
+};
+
+async function loadPortfolio() {
+  const [p, curve, txs] = await Promise.all([
+    api('/api/portfolio'),
+    api('/api/portfolio/history'),
+    api('/api/portfolio/transactions?limit=12'),
+  ]);
+
+  $('p-empty').hidden = p.count > 0 || txs.length > 0;
+  renderPortfolioHead(p);
+  renderTotals(p);
+  renderHoldings(p);
+  renderCurve(curve);
+  renderLedger(txs);
+}
+
+function renderPortfolioHead(p) {
+  $('p-value').textContent = money(p.market_value);
+
+  const delta = $('p-delta');
+  if (p.pnl_pct == null) {
+    delta.textContent = '';
+    delta.className = 'delta tnum';
+  } else {
+    const up = p.pnl_abs >= 0;
+    delta.textContent = `${up ? '▲' : '▼'} ${signed(p.pnl_abs)} (${signed(p.pnl_pct)}%)`;
+    delta.className = `delta tnum ${up ? 'up' : 'down'}`;
+  }
+
+  $('p-basis').textContent = p.count
+    ? `${p.count} tenencia${p.count > 1 ? 's' : ''} · costo ${money(p.cost_basis)} ${p.currency}`
+    : '';
+
+  // Being told a total is short a position matters more than the total.
+  const warn = $('p-unpriced');
+  warn.hidden = !p.unpriced.length;
+  if (p.unpriced.length) {
+    warn.textContent = `Sin precio guardado para ${p.unpriced.join(', ')}: `
+      + 'esas posiciones no entran en el total. Corré check-alerts para traer sus velas.';
+  }
+}
+
+const TOTALS = [
+  ['cost_basis', 'Costo', (v, c) => money(v)],
+  ['realized_pnl', 'Realizado', (v) => money(v), 'signed'],
+  ['dividends', 'Dividendos', (v) => money(v)],
+  ['fees', 'Comisiones', (v) => money(v)],
+];
+
+function renderTotals(p) {
+  const dl = $('p-totals');
+  dl.innerHTML = '';
+  for (const [key, label, fmt, tone] of TOTALS) {
+    const value = p[key];
+    if (!value && key !== 'cost_basis') continue;
+    const box = document.createElement('div');
+    box.className = 'stat';
+    const cls = tone === 'signed' ? (value >= 0 ? 'up' : 'down') : '';
+    box.innerHTML = `<dt>${label}</dt><dd class="${cls}">${fmt(value)}</dd>`;
+    dl.appendChild(box);
+  }
+}
+
+function renderHoldings(p) {
+  const list = $('holding-list');
+  list.innerHTML = '';
+  for (const h of p.holdings) {
+    const li = document.createElement('li');
+    li.className = 'holding';
+    li.tabIndex = 0;
+    li.setAttribute('role', 'button');
+    li.setAttribute('aria-label', `${h.ticker}, ver detalle`);
+
+    const pnlCls = h.pnl_pct == null ? '' : (h.pnl_pct >= 0 ? 'up' : 'down');
+    const day = h.day_change_pct == null ? ''
+      : `<span class="pnl ${h.day_change_pct >= 0 ? 'up' : 'down'}">${signed(h.day_change_pct)}% hoy</span>`;
+
+    li.innerHTML = `
+      <div class="row-top">
+        <span class="sym">${h.ticker}</span>
+        <span class="value tnum">${h.value == null ? 'sin precio' : money(h.value)}</span>
+      </div>
+      <div class="row-meta">
+        <span class="qty">${num(h.quantity, h.quantity % 1 ? 4 : 0)} × ${money(h.price)}
+          · costo ${money(h.average_cost)}</span>
+        <span class="pnl ${pnlCls}">${h.pnl_pct == null ? '—' : `${signed(h.pnl_pct)}%`}</span>
+      </div>
+      <div class="weight">
+        <span class="weight-bar"><i style="width:${Math.max(2, h.weight_pct || 0)}%"></i></span>
+        <span class="weight-pct">${h.weight_pct == null ? '—' : `${num(h.weight_pct, 0)}%`}</span>
+      </div>
+      ${day ? `<div class="row-meta">${day}</div>` : ''}`;
+
+    const open = () => showDetail(h.ticker);
+    li.addEventListener('click', open);
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); }
+    });
+    list.appendChild(li);
+  }
+}
+
+function renderCurve(curve) {
+  const box = $('p-curve-box');
+  const legend = $('p-curve-legend');
+
+  // One point is not a curve; saying so beats drawing a dot on an empty axis.
+  if (curve.sessions < 2) {
+    if (state.charts.curve) { state.charts.curve.destroy(); state.charts.curve = null; }
+    $('p-curve').innerHTML = '';
+    box.hidden = curve.sessions === 0;
+    legend.innerHTML = curve.sessions
+      ? '<span>Una sola valuación guardada. La curva aparece con la segunda.</span>' : '';
+    return;
+  }
+  box.hidden = false;
+
+  const xs = curve.day.map((d) => Date.parse(d) / 1000);
+  if (state.charts.curve) state.charts.curve.destroy();
+  state.charts.curve = new uPlot({
+    width: Math.max(240, $('p-curve').clientWidth - 8),
+    height: 190,
+    padding: [10, 8, 0, 0],
+    legend: { show: false },
+    cursor: { drag: { x: true, y: false } },
+    scales: { x: { time: true } },
+    axes: [axis(), axis({ size: 58, values: (u, ticks) => ticks.map((v) => v.toFixed(0)) })],
+    series: [
+      { label: 'Día' },
+      { label: 'Valor', stroke: LINES.close.color, width: 2, fill: 'rgba(34,197,94,.10)' },
+      { label: 'Costo', stroke: LINES.slow.color, width: 1.4, dash: [7, 4] },
+    ],
+  }, [xs, curve.market_value, curve.cost_basis], $('p-curve'));
+
+  const swatch = (line) =>
+    `<i style="border-top-color:${line.color};border-top-style:${line.dash ? 'dashed' : 'solid'}"></i>`;
+  legend.innerHTML =
+    `<span>${swatch(LINES.close)}valor</span>`
+    + `<span>${swatch(LINES.slow)}costo</span>`
+    + `<span>${curve.sessions} día(s)</span>`;
+}
+
+function renderLedger(txs) {
+  const list = $('tx-list');
+  list.innerHTML = '';
+  if (!txs.length) {
+    list.innerHTML = '<li class="notice">El libro mayor está vacío.</li>';
+    return;
+  }
+  for (const t of txs) {
+    const li = document.createElement('li');
+    li.className = `tx ${t.kind}`;
+    // A cash dividend carries an amount and no share count; printing a price
+    // of "—" next to it reads as missing data instead of not applicable.
+    let detail = '';
+    if (t.kind === 'split') detail = `ratio ${num(t.ratio, 0)}:1`;
+    else if (t.price != null && t.quantity != null) {
+      detail = `${num(t.quantity, t.quantity % 1 ? 4 : 0)} × ${money(t.price)}`;
+    } else if (t.amount != null) detail = 'en efectivo';
+    li.innerHTML = `
+      <div class="tx-top">
+        <span class="tx-kind">${t.ticker} · ${KIND_LABEL[t.kind] || t.kind}</span>
+        <span class="tx-cash ${t.cash_flow > 0 ? 'in' : 'out'}">${
+          t.cash_flow ? signed(t.cash_flow) : ''}</span>
+      </div>
+      <div class="tx-sub"><span>${t.trade_date}</span><span>${detail}</span></div>`;
+    list.appendChild(li);
+  }
+}
+
 // --- navegación -------------------------------------------------------------
 
 function pickTab(name) {
@@ -424,23 +601,59 @@ function pickTab(name) {
   if (name === 'chart' && state.charts.price) state.charts.price.setSize(chartSize(240));
 }
 
-function showList() {
-  state.ticker = null;
-  $('view-detail').hidden = true;
-  $('view-list').hidden = false;
-  $('back').hidden = true;
-  $('title').textContent = 'Tickers';
-  location.hash = '';
-  for (const key of Object.keys(state.charts)) {
-    if (state.charts[key]) state.charts[key].destroy();
-    state.charts[key] = null;
+const TITLES = { portfolio: 'Cartera', tickers: 'Tickers' };
+
+function destroyCharts(...names) {
+  for (const name of names) {
+    if (state.charts[name]) state.charts[name].destroy();
+    state.charts[name] = null;
   }
-  loadList().catch((e) => showError(e.message));
+}
+
+/** Show one of the two top level sections. */
+function showView(view) {
+  state.view = view;
+  state.ticker = null;
+  destroyCharts('price', 'series');
+
+  $('view-portfolio').hidden = view !== 'portfolio';
+  $('view-list').hidden = view !== 'tickers';
+  $('view-detail').hidden = true;
+  $('back').hidden = true;
+  $('title').textContent = TITLES[view];
+
+  for (const item of document.querySelectorAll('.nav-item')) {
+    if (item.dataset.view === view) item.setAttribute('aria-current', 'page');
+    else item.removeAttribute('aria-current');
+  }
+
+  const load = view === 'portfolio' ? loadPortfolio : loadList;
+  load().catch((e) => showError(e.message));
+}
+
+function navigate(view, { push = true } = {}) {
+  if (push) location.hash = view === 'portfolio' ? '' : `#/${view}`;
+  showView(view);
+}
+
+/** Read the hash and render whatever it names. Deep links have to work. */
+function route() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (hash.startsWith('t/')) {
+    const ticker = hash.slice(2).toUpperCase();
+    if (ticker) { showDetail(ticker); return; }
+  }
+  showView(hash === 'tickers' ? 'tickers' : 'portfolio');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  $('back').addEventListener('click', showList);
+  // Back returns to whichever section the detail was opened from.
+  $('back').addEventListener('click', () => navigate(state.view));
   $('status').addEventListener('click', loadStatus);
+
+  for (const item of document.querySelectorAll('.nav-item')) {
+    item.addEventListener('click', () => navigate(item.dataset.view));
+  }
 
   for (const tab of document.querySelectorAll('.tab')) {
     tab.addEventListener('click', () => pickTab(tab.dataset.tab));
@@ -453,22 +666,20 @@ document.addEventListener('DOMContentLoaded', () => {
       if (state.charts.price && !$('tab-chart').hidden) {
         state.charts.price.setSize(chartSize(240));
       }
+      if (state.charts.curve && !$('view-portfolio').hidden) {
+        state.charts.curve.setSize({
+          width: Math.max(240, $('p-curve').clientWidth - 8), height: 190,
+        });
+      }
     }, 120);
   });
 
-  window.addEventListener('hashchange', () => {
-    const wanted = location.hash.replace('#', '');
-    if (!wanted && state.ticker) showList();
-  });
+  window.addEventListener('hashchange', route);
 
   renderRanges();
   loadStatus();
   setInterval(loadStatus, 60000);
-
-  const wanted = location.hash.replace('#', '');
-  loadList()
-    .then(() => { if (wanted) showDetail(wanted); })
-    .catch((e) => showError(e.message));
+  route();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* offline es un plus, no un requisito */ });
