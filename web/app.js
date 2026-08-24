@@ -8,16 +8,38 @@
 
 const $ = (id) => document.getElementById(id);
 
-async function api(path) {
-  const response = await fetch(path);
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `${response.status} ${response.statusText}`);
+    // FastAPI reports its own schema failures as a list of field errors; the
+    // domain reports a sentence written for a person. Show whichever came.
+    const detail = Array.isArray(body.detail)
+      ? body.detail.map((d) => `${(d.loc || []).slice(-1)}: ${d.msg}`).join(' · ')
+      : body.detail;
+    throw new Error(detail || `${response.status} ${response.statusText}`);
   }
-  return response.json();
+  return response.status === 204 ? null : response.json();
 }
 
-const state = { view: 'portfolio', ticker: null, days: 252, series: 'rsi', charts: {} };
+const send = (path, method, body) => api(path, {
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: body === undefined ? undefined : JSON.stringify(body),
+});
+
+function showOk(message) {
+  const box = $('error');
+  box.textContent = message;
+  box.className = 'toast ok';
+  box.hidden = false;
+  clearTimeout(showError.timer);
+  showError.timer = setTimeout(() => { box.hidden = true; box.className = 'toast'; }, 3000);
+}
+
+const state = {
+  view: 'portfolio', ticker: null, days: 252, series: 'rsi', charts: {}, kinds: null,
+};
 
 const RANGES = [
   { label: '1M', days: 22 },
@@ -383,7 +405,28 @@ async function loadAlerts() {
       <div class="row-meta">
         <span>evaluada ${ago(a.last_evaluated_at)}</span>
         <span class="chip ${tone}">${text}</span>
+      </div>
+      <div class="alert-actions">
+        <button class="mini" data-act="toggle">${a.active ? 'Silenciar' : 'Activar'}</button>
+        <button class="mini danger" data-act="delete" aria-label="Borrar alerta">
+          <svg aria-hidden="true"><use href="#i-trash"/></svg>
+        </button>
       </div>`;
+    li.querySelector('[data-act="toggle"]').addEventListener('click', async () => {
+      try {
+        await send(`/api/alerts/${a.id}`, 'PATCH', { active: !a.active });
+        await loadAlerts();
+      } catch (e) { showError(e.message); }
+    });
+    li.querySelector('[data-act="delete"]').addEventListener('click', async () => {
+      // Soft delete, so the confirmation says what actually happens to history.
+      if (!confirm(`¿Borrar la alerta ${a.kind}? Los disparos que ya tuvo se conservan.`)) return;
+      try {
+        await send(`/api/alerts/${a.id}`, 'DELETE');
+        showOk('Alerta borrada.');
+        await loadAlerts();
+      } catch (e) { showError(e.message); }
+    });
     list.appendChild(li);
   }
 
@@ -403,11 +446,206 @@ async function loadAlerts() {
       <div class="row-meta">
         <span>${ago(e.fired_at)}</span>
         <span>${e.delivered.length ? `enviado por ${e.delivered.join(', ')}` : 'no entregado'}</span>
-      </div>`;
+      </div>
+      ${e.acknowledged_at ? '' : '<div class="alert-actions">'
+        + '<button class="mini" data-act="ack">Marcar visto</button></div>'}`;
+    const ack = li.querySelector('[data-act="ack"]');
+    if (ack) {
+      ack.addEventListener('click', async () => {
+        try {
+          await send(`/api/events/${e.id}/ack`, 'POST');
+          await loadAlerts();
+        } catch (err) { showError(err.message); }
+      });
+    }
     feed.appendChild(li);
   }
 }
 
+
+
+// --- hoja inferior ----------------------------------------------------------
+
+const sheet = {
+  el: null,
+  open(title, fields, onSubmit) {
+    this.el = $('sheet');
+    $('sheet-title').textContent = title;
+    $('sheet-error').hidden = true;
+    $('sheet-body').innerHTML = '';
+    for (const field of fields) $('sheet-body').appendChild(field);
+    this.onSubmit = onSubmit;
+    this.el.showModal();
+    const first = $('sheet-body').querySelector('input, select, textarea');
+    if (first) first.focus();
+  },
+  close() { if (this.el) this.el.close(); },
+  fail(message) {
+    const box = $('sheet-error');
+    box.textContent = message;
+    box.hidden = false;
+    box.scrollIntoView({ block: 'nearest' });
+  },
+};
+
+/** One labelled control. The label is always visible, never a placeholder. */
+function field(name, label, { type = 'text', value = '', options = null, hint = '', step, min, required = false } = {}) {
+  const wrap = document.createElement('div');
+  wrap.className = 'f';
+  const id = `f-${name}`;
+  const control = options
+    ? `<select id="${id}" name="${name}">${options.map((o) => {
+        const [v, text] = Array.isArray(o) ? o : [o, o];
+        return `<option value="${v}"${String(v) === String(value) ? ' selected' : ''}>${text}</option>`;
+      }).join('')}</select>`
+    : type === 'textarea'
+      ? `<textarea id="${id}" name="${name}">${value}</textarea>`
+      : `<input id="${id}" name="${name}" type="${type}" value="${value}"
+           ${step ? `step="${step}"` : ''} ${min != null ? `min="${min}"` : ''}
+           ${required ? 'required' : ''} ${type === 'text' ? 'autocapitalize="characters"' : ''}>`;
+  wrap.innerHTML = `<label for="${id}">${label}</label>${control}`
+    + (hint ? `<span class="hint">${hint}</span>` : '');
+  return wrap;
+}
+
+function formValues() {
+  const out = {};
+  for (const el of $('sheet-body').querySelectorAll('input, select, textarea')) {
+    out[el.name] = el.value.trim();
+  }
+  return out;
+}
+
+// --- alta de alerta ---------------------------------------------------------
+
+// Los parámetros viajan con su nombre técnico, que es correcto en la base y
+// áspero en un formulario. La traducción es presentación y vive acá.
+const PARAM_LABEL = {
+  pct: 'Porcentaje', price: 'Precio', days: 'Días', months: 'Meses',
+  fast: 'Media rápida', slow: 'Media lenta', signal: 'Señal', period: 'Período',
+  overbought: 'Sobrecompra', oversold: 'Sobreventa', reference: 'Referencia',
+  lookback_days: 'Ventana (días)', multiple: 'Múltiplo de ATR', ratio: 'Ratio',
+  tolerance_pct: 'Tolerancia %', window: 'Ventana', direction: 'Dirección',
+};
+
+const CHOICE_LABEL = {
+  buy: 'precio de compra', baseline: 'precio de hoy',
+  any: 'cualquiera', above: 'hacia arriba', below: 'hacia abajo',
+};
+
+const paramLabel = (key) => PARAM_LABEL[key] || key.replace(/_/g, ' ');
+const choiceLabel = (value) => [value, CHOICE_LABEL[value] || value];
+
+async function alertKinds() {
+  if (!state.kinds) state.kinds = await api('/api/alert-kinds');
+  return state.kinds;
+}
+
+async function openAlertForm(ticker) {
+  const catalogue = await alertKinds();
+  const picker = field('kind', 'Tipo de alerta', {
+    options: catalogue.map((k) => [k.key, k.label]),
+    value: 'rsi',
+  });
+  const describe = document.createElement('p');
+  describe.className = 'hint';
+  const params = document.createElement('div');
+  params.className = 'params-box';
+  const cooldown = field('cooldown_hours', 'Cooldown (horas)', {
+    type: 'number', value: '24', min: 0,
+    hint: 'Tiempo mínimo entre dos avisos de esta alerta.',
+  });
+  const note = field('note', 'Nota', { type: 'textarea' });
+
+  // The parameter fields are built from the catalogue, so a new alert kind
+  // shows up in the app without the client knowing anything about it.
+  const paint = () => {
+    const kind = catalogue.find((k) => k.key === picker.querySelector('select').value);
+    describe.textContent = kind.description;
+    params.innerHTML = '';
+    for (const [key, value] of Object.entries(kind.defaults)) {
+      const choices = (kind.choices || {})[key];
+      params.appendChild(field(`p_${key}`, paramLabel(key), {
+        value,
+        options: choices ? choices.map(choiceLabel) : null,
+        type: choices ? 'text' : 'number',
+        step: 'any',
+      }));
+    }
+    if (kind.requires_position) {
+      describe.textContent += ' Necesita una posición cargada.';
+    }
+  };
+  picker.querySelector('select').addEventListener('change', paint);
+  paint();
+
+  sheet.open(`Nueva alerta · ${ticker}`, [picker, describe, params, cooldown, note], async () => {
+    const values = formValues();
+    const body = { kind: values.kind, params: {}, note: values.note };
+    for (const [key, value] of Object.entries(values)) {
+      if (!key.startsWith('p_') || value === '') continue;
+      const asNumber = Number(value);
+      body.params[key.slice(2)] = Number.isNaN(asNumber) ? value : asNumber;
+    }
+    if (values.cooldown_hours !== '') body.cooldown_hours = Number(values.cooldown_hours);
+    await send(`/api/tickers/${ticker}/alerts`, 'POST', body);
+    sheet.close();
+    showOk('Alerta creada.');
+    await loadAlerts();
+  });
+}
+
+// --- alta de movimiento -----------------------------------------------------
+
+const TX_KINDS = [
+  ['buy', 'Compra'], ['sell', 'Venta'], ['dividend', 'Dividendo'],
+  ['split', 'Split'], ['fee', 'Comisión'],
+];
+
+function openTransactionForm(ticker = '') {
+  const today = new Date().toISOString().slice(0, 10);
+  const kind = field('kind', 'Tipo', { options: TX_KINDS, value: 'buy' });
+  const symbol = field('ticker', 'Ticker', { value: ticker, required: true });
+  const when = field('trade_date', 'Fecha', { type: 'date', value: today, required: true });
+  const quantity = field('quantity', 'Cantidad', { type: 'number', step: 'any', min: 0 });
+  const price = field('price', 'Precio por acción', { type: 'number', step: 'any', min: 0 });
+  const amount = field('amount', 'Monto total', { type: 'number', step: 'any' });
+  const ratio = field('ratio', 'Ratio del split', { type: 'number', step: 'any', min: 0,
+    hint: '4 significa 4 acciones nuevas por cada una vieja.' });
+  const fees = field('fees', 'Comisiones', { type: 'number', step: 'any', min: 0, value: '0' });
+
+  // Progressive disclosure: a split has no price and a cash dividend has no
+  // share count. Showing every field for every kind invites wrong entries.
+  const paint = () => {
+    const value = kind.querySelector('select').value;
+    const shares = value === 'buy' || value === 'sell';
+    quantity.hidden = !shares;
+    price.hidden = !shares;
+    ratio.hidden = value !== 'split';
+    amount.hidden = !(value === 'dividend' || value === 'fee');
+    fees.hidden = value === 'split';
+  };
+  kind.querySelector('select').addEventListener('change', paint);
+  paint();
+
+  sheet.open('Cargar movimiento',
+    [kind, symbol, when, quantity, price, ratio, amount, fees], async () => {
+      const v = formValues();
+      const body = {
+        ticker: v.ticker.toUpperCase(),
+        kind: v.kind,
+        trade_date: v.trade_date,
+        fees: v.fees === '' ? 0 : Number(v.fees),
+      };
+      for (const key of ['quantity', 'price', 'amount', 'ratio']) {
+        if (v[key] !== '' && v[key] !== undefined) body[key] = Number(v[key]);
+      }
+      await send('/api/portfolio/transactions', 'POST', body);
+      sheet.close();
+      showOk('Movimiento cargado.');
+      await loadPortfolio();
+    });
+}
 
 // --- cartera ----------------------------------------------------------------
 
@@ -654,6 +892,27 @@ document.addEventListener('DOMContentLoaded', () => {
   for (const item of document.querySelectorAll('.nav-item')) {
     item.addEventListener('click', () => navigate(item.dataset.view));
   }
+
+  $('add-tx').addEventListener('click', () => openTransactionForm());
+  $('add-alert').addEventListener('click', () => {
+    openAlertForm(state.ticker).catch((e) => showError(e.message));
+  });
+  $('sheet-close').addEventListener('click', () => sheet.close());
+  $('sheet-cancel').addEventListener('click', () => sheet.close());
+  $('sheet-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const save = $('sheet-save');
+    save.disabled = true;
+    save.textContent = 'Guardando…';
+    try {
+      await sheet.onSubmit();
+    } catch (e) {
+      sheet.fail(e.message);
+    } finally {
+      save.disabled = false;
+      save.textContent = 'Guardar';
+    }
+  });
 
   for (const tab of document.querySelectorAll('.tab')) {
     tab.addEventListener('click', () => pickTab(tab.dataset.tab));

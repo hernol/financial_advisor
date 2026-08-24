@@ -21,31 +21,31 @@ def test_defaults_of_every_kind_normalise_cleanly():
 
 def test_rel_strength_window_must_be_known():
     assert kinds.normalize_params(kinds.REL_STRENGTH, {"pct": 5, "window": "6m"})["window"] == "6m"
-    with pytest.raises(ValidationError, match="window"):
+    with pytest.raises(ValidationError, match="ventana"):
         kinds.normalize_params(kinds.REL_STRENGTH, {"pct": 5, "window": "9m"})
 
 
 def test_atr_stop_multiple_is_numeric_and_positive():
     assert kinds.normalize_params(kinds.ATR_STOP, {"multiple": "2.5"})["multiple"] == pytest.approx(2.5)
-    with pytest.raises(ValidationError, match="positive"):
+    with pytest.raises(ValidationError, match="negativo"):
         kinds.normalize_params(kinds.ATR_STOP, {"multiple": -1})
-    with pytest.raises(ValidationError, match="numeric"):
+    with pytest.raises(ValidationError, match="número"):
         kinds.normalize_params(kinds.ATR_STOP, {"multiple": "mucho"})
 
 
 def test_sma_break_direction_is_mandatory_and_bounded():
     assert kinds.normalize_params(kinds.SMA_BREAK, {"direction": "above"})["direction"] == "above"
-    with pytest.raises(ValidationError, match="direction"):
+    with pytest.raises(ValidationError, match="[Dd]irección"):
         kinds.normalize_params(kinds.SMA_BREAK, {"direction": "any"})
 
 
 def test_macd_cross_rejects_inverted_periods():
-    with pytest.raises(ValidationError, match="fast < slow"):
+    with pytest.raises(ValidationError, match="menor que la lenta"):
         kinds.normalize_params(kinds.MACD_CROSS, {"fast": 30, "slow": 10})
 
 
 def test_macd_cross_direction_is_validated():
-    with pytest.raises(ValidationError, match="direction"):
+    with pytest.raises(ValidationError, match="[Dd]irección"):
         kinds.normalize_params(kinds.MACD_CROSS, {"direction": "sideways"})
 
 

@@ -579,3 +579,178 @@ select:hover { border-color: var(--border); }
 .tx-cash.in { color: var(--up); }
 .tx-cash.out { color: var(--fg-muted); }
 .tx-sub { font-family: var(--f-mono); font-size: .7rem; color: var(--fg-dim); display: flex; gap: var(--s3); flex-wrap: wrap; }
+
+/* --- section headings with an action -------------------------------------- */
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+.section-head .section-h { margin-bottom: var(--s3); }
+
+.add {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 36px;
+  padding: 0 var(--s3);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--r2);
+  color: var(--accent);
+  font: inherit;
+  font-size: .8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease);
+}
+.add:hover { background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.add svg { width: 15px; height: 15px; }
+
+/* --- row actions ---------------------------------------------------------- */
+
+.alert-actions { display: flex; gap: var(--s2); }
+
+.mini {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s1);
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 var(--s2);
+  background: none;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r1);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: .7rem;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.mini:hover { color: var(--fg); border-color: var(--border); }
+.mini.danger:hover { color: var(--danger); border-color: var(--danger); }
+.mini svg { width: 15px; height: 15px; }
+
+/* --- bottom sheet --------------------------------------------------------- */
+/* <dialog> gives the focus trap, Esc and inertness for free; reimplementing
+   any of that by hand is how a modal ends up unusable with a keyboard. */
+
+.sheet {
+  width: 100%;
+  max-width: 32rem;
+  margin: auto auto 0;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-bottom: none;
+  border-radius: var(--r3) var(--r3) 0 0;
+  background: var(--card);
+  color: var(--fg);
+  max-height: 88dvh;
+}
+.sheet::backdrop { background: rgb(2 6 23 / .72); backdrop-filter: blur(3px); }
+
+@media (min-width: 640px) {
+  .sheet { margin: auto; border-radius: var(--r3); border-bottom: 1px solid var(--border-soft); }
+}
+
+.sheet form { display: flex; flex-direction: column; max-height: 88dvh; }
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: var(--s4) var(--s4) var(--s3);
+  border-bottom: 1px solid var(--border-soft);
+}
+.sheet-head h2 { margin: 0; font-size: 1.02rem; font-weight: 600; }
+
+.sheet-body {
+  padding: var(--s4);
+  padding-bottom: var(--s3);
+  overflow-y: auto;
+  display: grid;
+  gap: var(--s3);
+}
+
+.sheet-foot {
+  display: flex;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4) calc(var(--s4) + var(--safe-b));
+  border-top: 1px solid var(--border-soft);
+}
+
+.btn {
+  flex: 1;
+  min-height: var(--tap);
+  border-radius: var(--r2);
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: .9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, #fff); }
+.btn.primary:disabled { opacity: .55; cursor: progress; }
+.btn.ghost { background: none; border-color: var(--border-soft); color: var(--fg-muted); }
+.btn.ghost:hover { color: var(--fg); border-color: var(--border); }
+
+/* --- form fields ---------------------------------------------------------- */
+/* Labels are always visible: a placeholder disappears the moment there is a
+   value, exactly when the user needs to know what the field was. */
+
+.f {
+  display: grid;
+  gap: var(--s2);
+}
+.f > label {
+  font-size: .72rem;
+  font-weight: 500;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+}
+.f input, .f select, .f textarea {
+  font: inherit;
+  font-family: var(--f-mono);
+  font-size: .92rem;
+  min-height: var(--tap);
+  width: 100%;
+  background: var(--muted);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r2);
+  padding: var(--s2) var(--s3);
+}
+.f textarea { font-family: var(--f-sans); min-height: 68px; resize: vertical; }
+.f input:hover, .f select:hover { border-color: var(--border); }
+.f input:focus, .f select:focus, .f textarea:focus { border-color: var(--accent); }
+.f .hint { font-size: .74rem; color: var(--fg-dim); font-family: var(--f-sans); }
+
+.f-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+
+.params-box {
+  display: grid;
+  gap: var(--s3);
+  padding: var(--s3);
+  background: var(--muted);
+  border-radius: var(--r2);
+}
+.params-box:empty { display: none; }
+
+.sheet-error {
+  margin: 0 var(--s4);
+  padding: var(--s3);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  border: 1px solid var(--danger);
+  border-radius: var(--r2);
+  color: var(--down);
+  font-size: .84rem;
+}
+
+.toast.ok { border-color: var(--accent); color: var(--accent); }

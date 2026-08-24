@@ -433,6 +433,24 @@ Los precios son **el último cierre guardado**, no una cotización en vivo: la p
 sale a pedir datos. Si una posición no tiene velas guardadas, la app avisa que quedó
 afuera del total en vez de valuarla en cero.
 
+### Cargar cosas desde el teléfono
+
+Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**
+(compra, venta, dividendo, split, comisión) y **marcar avisos como vistos**.
+
+El formulario de alerta se arma solo a partir del catálogo: los 18 tipos con sus valores
+por defecto y sus opciones salen de `fa/alerts/kinds.py`, así que un tipo nuevo aparece en
+la app sin tocar el cliente. La validación es exactamente la misma que usa la terminal —
+si un parámetro no sirve en el CLI, tampoco sirve acá, y el mensaje de error es el mismo.
+
+Dos cosas a tener en cuenta:
+
+- Una alerta de porcentaje con referencia *precio de hoy* se ancla al **último cierre
+  guardado**, no a una cotización en vivo. Si el ticker todavía no tiene velas, la app te
+  lo dice en vez de anclar a un número inventado.
+- **Borrar es lógico**: la alerta deja de correr, pero todo lo que disparó se conserva.
+  Lo mismo con los movimientos.
+
 El indicador del encabezado dice hace cuánto corrió el último chequeo. Si dice `sin
 corridas` o se pone amarillo, los números que estás viendo son viejos: eso es más
 importante que los números mismos.

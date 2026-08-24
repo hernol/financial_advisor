@@ -9,7 +9,7 @@ import pandas as pd
 
 from fa import ai
 from fa.ai_context import DataPack, build_data_pack
-from fa.alerts import kinds
+from fa.alerts import authoring, kinds
 from fa.alerts.engine import CheckReport, run_checks
 from fa.alerts.suggestions import actionable
 from fa.app import App
@@ -187,48 +187,20 @@ def add_alert(
     expires_at: date | None = None,
     note: str = "",
 ) -> Alert:
-    """Validate and persist an alert, resolving the position it belongs to."""
-    definition = kinds.get_kind(kind)
-    resolved = kinds.normalize_params(kind, params)
-
-    if position_id is None:
-        open_positions = positions_store.positions_for_ticker(app.conn, ticker)
-        position_id = open_positions[0].id if open_positions else None
-    if definition.requires_position and position_id is None:
-        raise ValidationError(
-            f"La alerta '{kind}' necesita una posición cargada para {ticker.upper()} "
-            "(agregá la compra primero)."
-        )
-    if kind in {kinds.PCT_UP, kinds.PCT_DOWN}:
-        resolved = _resolve_reference(app, ticker, resolved, position_id)
-
-    alert = Alert(
-        ticker=ticker.upper(),
-        kind=kind,
-        params=resolved,
+    """Validate and persist an alert. The reference price comes from the market."""
+    return authoring.create_alert(
+        app.conn,
+        ticker,
+        kind,
+        params,
+        price_for=lambda symbol: app.market.quote(symbol).price,
         position_id=position_id,
-        one_shot=definition.one_shot if one_shot is None else one_shot,
-        cooldown_hours=app.settings.default_cooldown_hours if cooldown_hours is None else cooldown_hours,
+        cooldown_hours=cooldown_hours,
+        default_cooldown_hours=app.settings.default_cooldown_hours,
+        one_shot=one_shot,
         expires_at=expires_at,
         note=note,
     )
-    return alerts_store.add_alert(app.conn, alert)
-
-
-def _resolve_reference(
-    app: App, ticker: str, params: dict[str, Any], position_id: int | None
-) -> dict[str, Any]:
-    """A 'baseline' percentage alert freezes today's price as its reference."""
-    if params.get("reference") == "buy":
-        if position_id is None:
-            raise ValidationError(
-                "reference='buy' necesita una posición; usá reference='baseline' para anclar al precio de hoy."
-            )
-        return params
-    if params.get("baseline_price"):
-        return params
-    quote = app.market.quote(ticker)
-    return {**params, "baseline_price": quote.price}
 
 
 def check_alerts(app: App, ticker: str | None = None, *, trigger: str = "manual") -> CheckReport:

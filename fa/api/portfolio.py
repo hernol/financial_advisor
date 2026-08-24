@@ -10,11 +10,13 @@ while quietly depending on Yahoo answering.
 """
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
-from fa import ledger
+from fa import ledger, models
 from fa.api.deps import get_db
 from fa.store import history as history_store
 from fa.store.database import Database
@@ -151,3 +153,95 @@ def transactions(
         }
         for e in entries[:limit]
     ]
+
+
+class TransactionRequest(BaseModel):
+    """One ledger entry. Which fields matter depends on the kind."""
+
+    ticker: str = Field(min_length=1, max_length=12)
+    kind: str
+    trade_date: date
+    quantity: float | None = Field(default=None, gt=0)
+    price: float | None = Field(default=None, gt=0)
+    amount: float | None = None
+    ratio: float | None = Field(default=None, gt=0)
+    fees: float = Field(default=0.0, ge=0)
+    currency: str = Field(default="USD", max_length=8)
+    note: str = Field(default="", max_length=500)
+
+
+# What each kind actually needs, stated once so the message can name it.
+REQUIRED: dict[str, tuple[str, ...]] = {
+    models.BUY: ("quantity", "price"),
+    models.SELL: ("quantity", "price"),
+    models.SPLIT: ("ratio",),
+    models.DIVIDEND: (),
+    models.FEE: (),
+}
+
+
+@router.post("/transactions", status_code=201)
+def add_transaction(
+    body: TransactionRequest, db: Database = Depends(get_db)
+) -> dict[str, Any]:
+    """Append one entry to the ledger.
+
+    Nothing is edited in place and nothing is recalculated on the positions
+    table: the holding is derived from the entries, so adding one here is the
+    whole operation.
+    """
+    from fa.store import transactions as transactions_store
+
+    if body.kind not in models.TRANSACTION_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Tipo '{body.kind}' desconocido. Válidos: "
+            f"{', '.join(models.TRANSACTION_KINDS)}.",
+        )
+    missing = [f for f in REQUIRED[body.kind] if getattr(body, f) is None]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Una entrada de tipo '{body.kind}' necesita: {', '.join(missing)}.",
+        )
+    if body.kind == models.DIVIDEND and body.amount is None and body.quantity is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Un dividendo necesita un monto total o cantidad y precio por acción.",
+        )
+    if body.trade_date > date.today():
+        raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
+
+    entry = transactions_store.record(
+        db,
+        models.Transaction(
+            ticker=body.ticker,
+            kind=body.kind,
+            trade_date=body.trade_date,
+            quantity=body.quantity,
+            price=body.price,
+            amount=body.amount,
+            ratio=body.ratio,
+            fees=body.fees,
+            currency=body.currency,
+            note=body.note,
+        ),
+    )
+    return {
+        "id": entry.id,
+        "ticker": entry.ticker,
+        "kind": entry.kind,
+        "trade_date": entry.trade_date.isoformat(),
+        "cash_flow": entry.cash_flow,
+    }
+
+
+@router.delete("/transactions/{transaction_id}", status_code=204)
+def remove_transaction(transaction_id: int, db: Database = Depends(get_db)) -> None:
+    """Retire an entry from the rollup without erasing it from the history."""
+    from fa.store import transactions as transactions_store
+
+    if not transactions_store.soft_delete(db, transaction_id):
+        raise HTTPException(
+            status_code=404, detail=f"No existe el movimiento {transaction_id}."
+        )
