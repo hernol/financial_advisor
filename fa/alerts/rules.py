@@ -8,6 +8,7 @@ from datetime import date, timedelta
 from typing import Callable, Mapping
 
 from fa.alerts import kinds
+from fa.alerts import rules_technical
 from fa.indicators import detect_cross, drawdown_pct, rsi
 from fa.models import Alert, MarketContext, Position, Signal
 
@@ -217,6 +218,7 @@ REGISTRY: dict[str, RuleFn] = {
     kinds.RSI: rsi_bounds,
     kinds.DIVIDEND_EX_NEAR: dividend_ex_near,
     kinds.SPLIT_DETECTED: split_detected,
+    **rules_technical.REGISTRY,
 }
 
 

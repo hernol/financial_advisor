@@ -18,6 +18,7 @@ services:
       - FA_DESKTOP_NOTIFICATIONS=${FA_DESKTOP_NOTIFICATIONS:-false}
       - FA_COOLDOWN_HOURS=${FA_COOLDOWN_HOURS:-24}
       - FA_EARNINGS_WARNING_DAYS=${FA_EARNINGS_WARNING_DAYS:-7}
+      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
       # host.docker.internal lets the container reach llama-server on the host
       - FA_LOCAL_AI_URL=${FA_LOCAL_AI_URL:-http://host.docker.internal:5001/v1}
       - FA_LOCAL_AI_MODEL=${FA_LOCAL_AI_MODEL:-}
@@ -43,5 +44,6 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - FA_DESKTOP_NOTIFICATIONS=false
       - FA_COOLDOWN_HOURS=${FA_COOLDOWN_HOURS:-24}
+      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
     volumes:
       - ./data:/app/data

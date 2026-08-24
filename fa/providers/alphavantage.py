@@ -60,7 +60,15 @@ class AlphaVantageProvider:
             day = as_date(day_text)
             close = to_float(row.get("4. close"))
             if day and close is not None:
-                points.append(PricePoint(day=day, close=close))
+                points.append(
+                    PricePoint(
+                        day=day,
+                        close=close,
+                        high=to_float(row.get("2. high")),
+                        low=to_float(row.get("3. low")),
+                        volume=to_float(row.get("5. volume")),
+                    )
+                )
         if not points:
             raise ProviderError(f"alphavantage returned no history for {ticker}")
         points.sort(key=lambda p: p.day)

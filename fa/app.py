@@ -48,7 +48,7 @@ def build_app(*, echo_notifications: bool = True) -> Iterator[App]:
             f"'sudo chown -R $(id -u):$(id -g) {settings.db_path.parent}'."
         ) from exc
     try:
-        market = MarketService(build_chain(settings), conn)
+        market = MarketService(build_chain(settings), conn, benchmark=settings.benchmark)
         yield App(
             settings=settings,
             conn=conn,

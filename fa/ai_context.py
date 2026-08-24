@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 import pandas as pd
 
 from fa.indicators import rsi, sma
+from fa.analytics import build_snapshot
 from fa.models import Alert, MarketContext, Position
 
 FRESHNESS_RULES = """\
@@ -141,6 +142,44 @@ def _exposure_section(positions: Sequence[Position], alerts: Sequence[Alert], pr
     return lines
 
 
+def _fmt(value: float | None, suffix: str = "", digits: int = 2) -> str:
+    """Render a number or an explicit n/a; never a zero standing in for missing."""
+    if value is None:
+        return "n/a"
+    return f"{value:,.{digits}f}{suffix}"
+
+
+def _technical_section(context: MarketContext) -> tuple[list[str], list[str]]:
+    """Price-derived indicators, including how the ticker fares against the index."""
+    snapshot = build_snapshot(context)
+    returns = snapshot.returns or {}
+    strength = snapshot.relative_strength or {}
+    lines = [
+        "",
+        "## TECHNICALS (calculados por nosotros sobre el histórico de arriba)",
+        f"- Tendencia: {snapshot.trend} · precio vs SMA200: {_fmt(snapshot.vs_sma_slow_pct, '%')}",
+        f"- SMA50: {_fmt(snapshot.sma_fast)} · SMA200: {_fmt(snapshot.sma_slow)}",
+        f"- RSI(14): {_fmt(snapshot.rsi)} · %B Bollinger(20): {_fmt(snapshot.percent_b)}"
+        f" · MACD hist: {_fmt(snapshot.macd_histogram, digits=4)}"
+        f" · cruce MACD última rueda: {snapshot.macd_state or 'ninguno'}",
+        f"- Volatilidad anualizada (90 ruedas): {_fmt(snapshot.volatility_pct, '%')}"
+        f" · ATR(14): {_fmt(snapshot.atr)} ({_fmt(snapshot.atr_pct, '%')} del precio)",
+        f"- Rango 52 semanas: {_fmt(snapshot.low_52w)} – {_fmt(snapshot.high_52w)}"
+        f" · desde el máximo: {_fmt(snapshot.from_high_pct, '%')}"
+        f" · sobre el mínimo: {_fmt(snapshot.from_low_pct, '%')}",
+        f"- Máximo drawdown del período: {_fmt(snapshot.max_drawdown_pct, '%')}"
+        f" · volumen vs promedio 20d: {_fmt(snapshot.volume_ratio, 'x')}",
+        "- Retornos: "
+        + " · ".join(f"{label} {_fmt(returns.get(label), '%')}" for label in ("1m", "3m", "6m", "12m")),
+        f"- Fuerza relativa vs {snapshot.benchmark} (puntos porcentuales de exceso): "
+        + " · ".join(f"{label} {_fmt(strength.get(label), 'pts')}" for label in ("1m", "3m", "6m", "12m")),
+    ]
+    if snapshot.beats_benchmark is not None:
+        verdict = "le gana" if snapshot.beats_benchmark else "pierde contra"
+        lines.append(f"- En 12 meses {context.ticker} {verdict} {snapshot.benchmark}.")
+    return (lines, list(snapshot.missing()))
+
+
 def build_data_pack(
     context: MarketContext,
     annual: pd.DataFrame,
@@ -162,6 +201,7 @@ def build_data_pack(
     missing: list[str] = []
     for section, gaps in (
         _market_section(context),
+        _technical_section(context),
         _calendar_section(context),
         _fundamentals_section(annual, quarterly, fundamentals_source),
     ):

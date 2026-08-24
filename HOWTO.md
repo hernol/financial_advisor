@@ -175,14 +175,57 @@ financial_analyzer.py add-alert PODD --kind pct_down --param pct=10 --cooldown 1
 financial_analyzer.py add-alert PODD --kind price_above --param price=250 --expires 2026-12-31
 ```
 
+### Alertas de indicadores
+
+```bash
+# Pierde 10 puntos porcentuales contra el índice en 6 meses
+financial_analyzer.py add-alert RH --kind rel_strength --param pct=10 --param window=6m
+
+# Stop dimensionado por volatilidad: 3 x ATR bajo el máximo de los últimos 90 días
+financial_analyzer.py add-alert RH --kind atr_stop --param multiple=3 --param lookback_days=90
+
+# Volumen del día 2.5 veces su promedio de 20 ruedas
+financial_analyzer.py add-alert RH --kind volume_spike --param ratio=2.5
+
+# Nuevo máximo (o mínimo) de 52 semanas
+financial_analyzer.py add-alert RH --kind new_52w_high
+financial_analyzer.py add-alert RH --kind new_52w_low --param tolerance_pct=1
+
+# El precio perfora la SMA200 (filtro de tendencia)
+financial_analyzer.py add-alert RH --kind sma_break --param period=200 --param direction=below
+
+# Cruce de MACD
+financial_analyzer.py add-alert RH --kind macd_cross --param direction=above
+```
+
+Estas dependen de datos que no todos los proveedores entregan, y **cuando el dato
+falta la alerta no dispara en vez de asumir**:
+
+| Alerta | Necesita | Si falta |
+|---|---|---|
+| `rel_strength` | histórico del benchmark (`FA_BENCHMARK`, default SPY) | no dispara |
+| `atr_stop`, `volume_spike` | barras con high/low/volumen | no dispara |
+| `sma_break`, `macd_cross` | historial largo (200 ruedas para la SMA200) | no dispara |
+
+Dos detalles que importan:
+
+- `atr_stop` con `lookback_days=0` (default) mide desde el máximo posterior a la
+  compra. Si compraste hace mucho y la acción se derrumbó, ese máximo puede tener
+  años y el stop deja de ser accionable: poné una ventana (`lookback_days=90`)
+  para que el pico y el ATR estén en la misma escala temporal.
+- `volume_spike` ignora la rueda en curso. Intradía el proveedor devuelve una barra
+  parcial cuyo volumen es una fracción del real, y compararla contra el promedio
+  daría siempre un valor ridículo.
+
 Reglas a tener en cuenta:
 
 - `reference=buy` (default) usa tu precio de compra → necesita posición cargada.
   `reference=baseline` congela el precio del momento en que creás la alerta → sirve para watchlist.
-- `period_elapsed`, `trailing_stop` y `split_detected` **exigen** una posición cargada.
+- `period_elapsed`, `trailing_stop`, `atr_stop` y `split_detected` **exigen** una posición cargada.
 - Toda alerta tiene *cooldown* (default 24 h, configurable con `--cooldown` o `FA_COOLDOWN_HOURS`)
   para no spamearte. Las de precio objetivo son *one-shot*: se apagan al dispararse.
-- `sma_cross` sólo dispara **en la rueda del cruce**, no todos los días que la media siga arriba.
+- `sma_cross`, `sma_break` y `macd_cross` sólo disparan **en la rueda del cruce**, no todos los
+  días que la condición siga vigente.
 
 Activar/desactivar/borrar: menú interactivo, opción 8.
 
@@ -302,6 +345,58 @@ Al abrir el menú interactivo te muestra primero las alertas que todavía no mar
 ```
 
 Celdas en `n/a` = el proveedor no publicó esa línea del balance. No se rellenan con estimaciones.
+
+El análisis imprime tres bloques: el **snapshot técnico**, la tabla de **valuación**
+(revenue, FCF, deuda neta, yields) y la de **calidad del negocio** (márgenes,
+crecimiento, cobertura de intereses, conversión de FCF, ROE, apalancamiento).
+Con `--no-technicals` se omite el primero.
+
+### Deuda neta: real, no estimada
+
+La deuda neta sale de **deuda total menos caja** cuando el proveedor las publica.
+Sólo si faltan esas líneas se cae a una aproximación (40% del pasivo total), y en
+ese caso la tabla lo dice explícitamente y el DATA PACK avisa al modelo de que todo
+lo derivado del EV hereda esa aproximación. La columna `Net_Debt_Estimated` marca
+qué períodos son estimados.
+
+Importa más de lo que parece: en una empresa apalancada la diferencia entre la
+deuda real y el proxy distorsiona el EV y por lo tanto el `EV_FCF_Yield`, que es la
+métrica central de la comparativa.
+
+### Indicadores técnicos
+
+```bash
+# Snapshot completo: tendencia, RSI, MACD, Bollinger, ATR, 52 semanas, fuerza relativa
+.venv/bin/python financial_analyzer.py technicals RH
+
+# Machine readable (para encadenar con otro script)
+.venv/bin/python financial_analyzer.py technicals RH --json
+```
+
+Salida real:
+
+```
+📐 TÉCNICOS — RH (1255 ruedas)
+  Tendencia      bajista    precio vs SMA200 -5.03% ▼
+  SMA50/SMA200   169.31 / 163.17
+  RSI(14)        37.38      %B Bollinger 0.06      MACD sin cruce
+  Volatilidad    61.25% anual   ATR(14) 9.00 (5.81%)
+  Rango 52s      106.30 – 257.00   desde máx -39.70%   sobre mín +45.78%
+  Drawdown máx   84.43%    volumen vs 20d 1.28x
+  Retorno              1m         3m         6m        12m
+                  -11.20%    +13.59%    -18.18%    -29.17%
+  vs SPY          -14.50p    +11.22p    -30.03p    -49.28p
+
+  En 12 meses RH pierde contra SPY.
+```
+
+La fila **vs SPY** es la que responde la pregunta que ninguna otra métrica contesta:
+si la caída es del papel o es que se cayó todo el mercado. Se mide en puntos
+porcentuales de exceso sobre el benchmark. Cambiá el índice con `FA_BENCHMARK=QQQ`.
+
+Todo lo que no se puede calcular sale como `n/a` y se lista abajo en "Sin datos para":
+un historial corto no da SMA200, y un proveedor que sólo entrega cierres no da ni ATR
+ni volumen relativo. Nunca se rellena con un cero.
 
 ### Qué recibe la IA (y por qué no inventa)
 

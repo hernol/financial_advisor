@@ -18,6 +18,8 @@ ANALYSIS_HISTORY_PERIOD = "5y"
 DEFAULT_LOCAL_AI_URL = "http://localhost:1234/v1"
 DEFAULT_LOCAL_AI_TIMEOUT = 240  # the first call also loads the weights
 DEFAULT_LOCAL_AI_MAX_TOKENS = 2000
+# Index the positions are measured against for relative strength.
+DEFAULT_BENCHMARK = "SPY"
 
 
 def _flag(name: str, default: bool = False) -> bool:
@@ -55,6 +57,7 @@ class Settings:
     local_ai_api_key: str
     local_ai_timeout: int
     local_ai_max_tokens: int
+    benchmark: str
     db_path: Path
     log_path: Path
 
@@ -93,6 +96,7 @@ def load_settings() -> Settings:
         local_ai_api_key=os.environ.get("FA_LOCAL_AI_API_KEY", "not-needed"),
         local_ai_timeout=_int("FA_LOCAL_AI_TIMEOUT", DEFAULT_LOCAL_AI_TIMEOUT),
         local_ai_max_tokens=_int("FA_LOCAL_AI_MAX_TOKENS", DEFAULT_LOCAL_AI_MAX_TOKENS),
+        benchmark=os.environ.get("FA_BENCHMARK", DEFAULT_BENCHMARK).upper(),
         db_path=db_path,
         log_path=log_path,
     )

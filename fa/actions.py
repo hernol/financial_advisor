@@ -15,7 +15,7 @@ from fa.app import App
 from fa.errors import ValidationError
 from fa.digest import collect_facts
 from fa.local_tasks import extract_claims, portfolio_digest
-from fa.metrics import SUMMARY_COLUMNS
+from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
 from fa.models import AIReport, Alert, MarketContext, Position, Quote, Suggestion
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
@@ -47,10 +47,30 @@ def _oldest_buy_date(app: App, ticker: str):
 def show_metrics(frame: pd.DataFrame, ticker: str, title: str, unit_label: str) -> None:
     print(f"\n📊 {title} — {ticker}")
     print_table(frame, SUMMARY_COLUMNS)
+    if _has_quality_data(frame):
+        print(f"\n🏭 CALIDAD DEL NEGOCIO ({unit_label})")
+        print_table(frame, QUALITY_COLUMNS)
+    if _estimated_debt(frame):
+        print(
+            "   ⚠️  El proveedor no reportó deuda total y caja en algún período: "
+            "ahí Net_Debt es una estimación y el EV la hereda."
+        )
     draw_bar_chart(frame["FCF"].tolist(), frame["Period"].tolist(), f"FCF {unit_label} (millones)")
     draw_bar_chart(
         frame["EV_FCF_Yield"].tolist(), frame["Period"].tolist(), f"EV-Based FCF Yield {unit_label} (%)", unit="%"
     )
+
+
+def _has_quality_data(frame: pd.DataFrame) -> bool:
+    """True when at least one income-statement ratio could be computed."""
+    columns = [c for c in QUALITY_COLUMNS if c != "Period" and c in frame.columns]
+    return any(frame[column].notna().any() for column in columns)
+
+
+def _estimated_debt(frame: pd.DataFrame) -> bool:
+    if "Net_Debt_Estimated" not in frame.columns:
+        return False
+    return bool(frame["Net_Debt_Estimated"].fillna(False).any())
 
 
 def build_data_pack_for(app: App, ticker: str, external_context: str = "") -> DataPack:

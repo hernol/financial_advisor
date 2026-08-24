@@ -85,6 +85,7 @@ def make_settings(tmp_path, **overrides) -> Settings:
         "local_ai_api_key": "not-needed",
         "local_ai_timeout": 5,
         "local_ai_max_tokens": 2000,
+        "benchmark": "SPY",
         "db_path": tmp_path / "t.db",
         "log_path": tmp_path / "t.log",
     }

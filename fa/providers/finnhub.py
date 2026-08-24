@@ -66,9 +66,18 @@ class FinnhubProvider:
         )
         if not isinstance(payload, dict) or payload.get("s") != "ok":
             raise ProviderError(f"finnhub returned no candles for {ticker}")
+        highs = payload.get("h", [])
+        lows = payload.get("l", [])
+        volumes = payload.get("v", [])
         points = [
-            PricePoint(day=datetime.fromtimestamp(ts, tz=timezone.utc).date(), close=float(close))
-            for ts, close in zip(payload.get("t", []), payload.get("c", []))
+            PricePoint(
+                day=datetime.fromtimestamp(ts, tz=timezone.utc).date(),
+                close=float(close),
+                high=to_float(highs[index]) if index < len(highs) else None,
+                low=to_float(lows[index]) if index < len(lows) else None,
+                volume=to_float(volumes[index]) if index < len(volumes) else None,
+            )
+            for index, (ts, close) in enumerate(zip(payload.get("t", []), payload.get("c", [])))
         ]
         if not points:
             raise ProviderError(f"finnhub candles for {ticker} were empty")

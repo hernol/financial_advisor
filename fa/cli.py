@@ -8,6 +8,9 @@ from datetime import date
 
 from fa import actions
 from fa.alerts import kinds
+from fa.analytics import build_snapshot
+from fa.analytics import to_payload as analytics_payload
+from fa.config import ANALYSIS_HISTORY_PERIOD
 from fa.app import App, build_app, configure_logging
 from fa.errors import FinancialAnalyzerError
 from fa.portfolio import build_portfolio
@@ -18,6 +21,7 @@ from fa.store import positions as positions_store
 from fa.localai import LocalAIError
 from fa.ui import menu
 from fa.ui.suggestions_ui import review
+from fa.ui.technicals import render as render_technicals
 from fa.ui.views import (
     render_alerts,
     render_check_report,
@@ -50,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--period", choices=["annual", "quarterly", "both"], default="both")
     analyze.add_argument("--ai", action="store_true", help="además pide el reporte estratégico a Gemini")
     analyze.add_argument("--context", default="", help="texto externo para cruzar con los datos duros")
+    analyze.add_argument("--no-technicals", action="store_true", help="omite el bloque de indicadores")
+
+    tech = sub.add_parser("technicals", help="indicadores técnicos y fuerza relativa vs el índice")
+    tech.add_argument("ticker", nargs="?", default=None)
+    tech.add_argument("--json", action="store_true", help="salida JSON del snapshot")
 
     add_pos = sub.add_parser("add-position", help="registra una compra")
     add_pos.add_argument("ticker", nargs="?", default=None)
@@ -147,6 +156,8 @@ def _cmd_analyze(app: App, args: argparse.Namespace) -> int:
     ticker = _resolve_ticker(app, args.ticker)
     annual, quarterly, context, source = actions.load_analysis(app, ticker)
     print(actions.snapshot_text(context.quote))
+    if not args.no_technicals:
+        render_technicals(build_snapshot(context))
     if args.period in {"annual", "both"}:
         actions.show_metrics(annual, ticker, f"COMPARATIVA ANUAL (fuente: {source})", "anual")
     if args.period in {"quarterly", "both"}:
@@ -161,6 +172,16 @@ def _cmd_analyze(app: App, args: argparse.Namespace) -> int:
                 f"\n🤖 {len(report.suggestions)} sugerencia(s) guardadas. "
                 "Revisalas con: financial_analyzer.py suggestions --review"
             )
+    return 0
+
+
+def _cmd_technicals(app: App, args: argparse.Namespace) -> int:
+    ticker = _resolve_ticker(app, args.ticker)
+    snapshot = build_snapshot(app.market.context(ticker, period=ANALYSIS_HISTORY_PERIOD))
+    if args.json:
+        print(json.dumps(analytics_payload(snapshot), indent=2, ensure_ascii=False))
+        return 0
+    render_technicals(snapshot)
     return 0
 
 
@@ -298,6 +319,8 @@ def main(argv: list[str] | None = None) -> int:
                 return _cmd_local_ai(app)
             if args.command == "analyze":
                 return _cmd_analyze(app, args)
+            if args.command == "technicals":
+                return _cmd_technicals(app, args)
             if args.command == "add-position":
                 return _cmd_add_position(app, args)
             if args.command == "add-alert":

@@ -9,6 +9,7 @@ from fa.models import CorporateEvent, Fundamentals, PricePoint, Quote
 from fa.providers.normalize import (
     BALANCE_ALIASES,
     CASHFLOW_ALIASES,
+    INCOME_ALIASES,
     as_date,
     pick,
     quarter_label,
@@ -90,12 +91,25 @@ class YahooProvider:
             raise ProviderError(f"yahoo history failed for {ticker}: {exc}") from exc
         if frame is None or frame.empty:
             raise ProviderError(f"yahoo returned empty history for {ticker}")
+        # yfinance already downloaded the whole OHLCV bar; keeping high/low/volume
+        # is what makes ATR and the volume indicators possible.
+        highs = _series(frame, "High")
+        lows = _series(frame, "Low")
+        volumes = _series(frame, "Volume")
         points: list[PricePoint] = []
-        for stamp, close in zip(frame.index, frame["Close"].tolist()):
+        for index, (stamp, close) in enumerate(zip(frame.index, frame["Close"].tolist())):
             day = as_date(stamp)
             value = to_float(close)
             if day and value is not None:
-                points.append(PricePoint(day=day, close=value))
+                points.append(
+                    PricePoint(
+                        day=day,
+                        close=value,
+                        high=highs[index] if index < len(highs) else None,
+                        low=lows[index] if index < len(lows) else None,
+                        volume=volumes[index] if index < len(volumes) else None,
+                    )
+                )
         if not points:
             raise ProviderError(f"yahoo history for {ticker} had no usable closes")
         return points
@@ -117,27 +131,33 @@ class YahooProvider:
     def _statement_rows(self, handle: Any, *, quarterly: bool) -> list[dict[str, Any]]:
         balance = _frame(handle, "quarterly_balance_sheet" if quarterly else "balance_sheet")
         cashflow = _frame(handle, "quarterly_cashflow" if quarterly else "cashflow")
-        if balance is None and cashflow is None:
+        income = _frame(handle, "quarterly_income_stmt" if quarterly else "income_stmt")
+        frames = (balance, cashflow, income)
+        if all(f is None for f in frames):
             return []
-        periods = sorted({as_date(c) for f in (balance, cashflow) if f is not None for c in f.columns} - {None})
+        periods = sorted({as_date(c) for f in frames if f is not None for c in f.columns} - {None})
         rows: list[dict[str, Any]] = []
         for period_end in periods:
             balance_col = _column(balance, period_end)
             cash_col = _column(cashflow, period_end)
+            income_col = _column(income, period_end)
             capex = to_millions(pick(cash_col, CASHFLOW_ALIASES["capex"]))
-            rows.append(
-                {
-                    "label": quarter_label(period_end) if quarterly else str(period_end.year),
-                    "period_end": period_end,
-                    "total_assets": to_millions(pick(balance_col, BALANCE_ALIASES["total_assets"])),
-                    "total_liabilities": to_millions(pick(balance_col, BALANCE_ALIASES["total_liabilities"])),
-                    "operating_cash_flow": to_millions(
-                        pick(cash_col, CASHFLOW_ALIASES["operating_cash_flow"])
-                    ),
-                    # Vendors report CapEx as a negative outflow; the model wants it positive.
-                    "capex": abs(capex) if capex is not None else None,
-                }
-            )
+            row = {
+                "label": quarter_label(period_end) if quarterly else str(period_end.year),
+                "period_end": period_end,
+                "total_assets": to_millions(pick(balance_col, BALANCE_ALIASES["total_assets"])),
+                "total_liabilities": to_millions(pick(balance_col, BALANCE_ALIASES["total_liabilities"])),
+                "operating_cash_flow": to_millions(
+                    pick(cash_col, CASHFLOW_ALIASES["operating_cash_flow"])
+                ),
+                # Vendors report CapEx as a negative outflow; the model wants it positive.
+                "capex": abs(capex) if capex is not None else None,
+            }
+            for key in ("total_debt", "cash"):
+                row[key] = to_millions(pick(balance_col, BALANCE_ALIASES[key]))
+            for key, aliases in INCOME_ALIASES.items():
+                row[key] = to_millions(pick(income_col, aliases))
+            rows.append(row)
         return rows[-6:]
 
     def _shares(self, handle: Any) -> float | None:
@@ -235,3 +255,10 @@ def _calendar_values(calendar: Any, key: str) -> list[Any]:
     if value is None:
         return []
     return list(value) if isinstance(value, (list, tuple)) else [value]
+
+
+def _series(frame: Any, column: str) -> list[float | None]:
+    """Optional OHLCV column as a plain list; absent columns yield nothing."""
+    if column not in getattr(frame, "columns", []):
+        return []
+    return [to_float(v) for v in frame[column].tolist()]

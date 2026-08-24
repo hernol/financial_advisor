@@ -14,6 +14,25 @@ BALANCE_ALIASES: Mapping[str, tuple[str, ...]] = {
         "Total Liab",
         "totalLiabilities",
     ),
+    "total_debt": ("Total Debt", "totalDebt", "shortLongTermDebtTotal"),
+    "cash": (
+        "Cash And Cash Equivalents",
+        "Cash Cash Equivalents And Short Term Investments",
+        "CashAndCashEquivalentsAtCarryingValue",
+        "cashAndCashEquivalentsAtCarryingValue",
+    ),
+}
+INCOME_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "revenue": ("Total Revenue", "Operating Revenue", "totalRevenue", "Revenues"),
+    "gross_profit": ("Gross Profit", "grossProfit"),
+    "operating_income": ("Operating Income", "EBIT", "operatingIncome", "OperatingIncomeLoss"),
+    "net_income": (
+        "Net Income",
+        "Net Income Common Stockholders",
+        "netIncome",
+        "NetIncomeLoss",
+    ),
+    "interest_expense": ("Interest Expense", "interestExpense", "InterestExpense"),
 }
 CASHFLOW_ALIASES: Mapping[str, tuple[str, ...]] = {
     "operating_cash_flow": (

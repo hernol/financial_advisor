@@ -16,6 +16,19 @@ FUNDAMENTAL_KEYS = (
     "capex",
 )
 
+# Extra keys a provider should fill when the vendor reports them. Missing values
+# stay ``None``: the ratios that need them are skipped rather than estimated.
+OPTIONAL_FUNDAMENTAL_KEYS = (
+    "total_debt",
+    "cash",
+    "revenue",
+    "gross_profit",
+    "operating_income",
+    "net_income",
+    "interest_expense",
+    "shares_outstanding",
+)
+
 
 @runtime_checkable
 class MarketDataProvider(Protocol):

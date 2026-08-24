@@ -17,6 +17,13 @@ SMA_CROSS = "sma_cross"
 RSI = "rsi"
 DIVIDEND_EX_NEAR = "dividend_ex_near"
 SPLIT_DETECTED = "split_detected"
+REL_STRENGTH = "rel_strength"
+ATR_STOP = "atr_stop"
+VOLUME_SPIKE = "volume_spike"
+NEW_52W_HIGH = "new_52w_high"
+NEW_52W_LOW = "new_52w_low"
+SMA_BREAK = "sma_break"
+MACD_CROSS = "macd_cross"
 
 
 @dataclass(frozen=True)
@@ -110,9 +117,83 @@ CATALOGUE: dict[str, AlertKind] = {
         defaults={"lookback_days": 90},
         requires_position=True,
     ),
+    REL_STRENGTH: AlertKind(
+        key=REL_STRENGTH,
+        label="Pierde contra el índice",
+        description=(
+            "Avisa cuando el ticker rinde X puntos porcentuales menos que el "
+            "benchmark en la ventana elegida (1m/3m/6m/12m)."
+        ),
+        defaults={"pct": 10.0, "window": "3m"},
+        required=("pct",),
+    ),
+    ATR_STOP: AlertKind(
+        key=ATR_STOP,
+        label="Stop por ATR",
+        description=(
+            "Trailing stop dimensionado por volatilidad: dispara si el precio cae "
+            "N veces el ATR desde el máximo. Con lookback_days=0 el máximo es el "
+            "posterior a la compra; con un valor mayor sólo mira esa ventana."
+        ),
+        defaults={"multiple": 3.0, "period": 14, "lookback_days": 0},
+        required=("multiple",),
+        requires_position=True,
+    ),
+    VOLUME_SPIKE: AlertKind(
+        key=VOLUME_SPIKE,
+        label="Volumen inusual",
+        description="Avisa cuando el volumen del día supera N veces su promedio reciente.",
+        defaults={"ratio": 2.5, "period": 20},
+        required=("ratio",),
+    ),
+    NEW_52W_HIGH: AlertKind(
+        key=NEW_52W_HIGH,
+        label="Máximo de 52 semanas",
+        description="Avisa cuando el precio marca un nuevo máximo de 52 semanas.",
+        defaults={"tolerance_pct": 0.0},
+    ),
+    NEW_52W_LOW: AlertKind(
+        key=NEW_52W_LOW,
+        label="Mínimo de 52 semanas",
+        description="Avisa cuando el precio marca un nuevo mínimo de 52 semanas.",
+        defaults={"tolerance_pct": 0.0},
+    ),
+    SMA_BREAK: AlertKind(
+        key=SMA_BREAK,
+        label="Cruce de la media",
+        description=(
+            "Filtro de tendencia: avisa cuando el precio cruza su media móvil "
+            "(por defecto la SMA200) en la dirección indicada."
+        ),
+        defaults={"period": 200, "direction": "below"},
+    ),
+    MACD_CROSS: AlertKind(
+        key=MACD_CROSS,
+        label="Cruce de MACD",
+        description="Avisa cuando la línea MACD cruza su señal en la última rueda.",
+        defaults={"fast": 12, "slow": 26, "signal": 9, "direction": "any"},
+    ),
 }
 
-NUMERIC_FIELDS = {"pct", "price", "days", "months", "fast", "slow", "period", "overbought", "oversold", "lookback_days"}
+NUMERIC_FIELDS = {
+    "pct",
+    "price",
+    "days",
+    "months",
+    "fast",
+    "slow",
+    "signal",
+    "period",
+    "overbought",
+    "oversold",
+    "lookback_days",
+    "multiple",
+    "ratio",
+    "tolerance_pct",
+}
+INTEGER_FIELDS = {"fast", "slow", "signal", "period", "days", "months", "lookback_days"}
+WINDOWS = ("1m", "3m", "6m", "12m")
+DIRECTIONS = ("any", "above", "below")
 
 
 def get_kind(key: str) -> AlertKind:
@@ -132,7 +213,7 @@ def normalize_params(key: str, params: Mapping[str, Any] | None) -> dict[str, An
     for name, value in list(merged.items()):
         if name in NUMERIC_FIELDS and value is not None:
             try:
-                merged[name] = float(value) if name not in {"fast", "slow", "period", "days", "months", "lookback_days"} else int(value)
+                merged[name] = int(value) if name in INTEGER_FIELDS else float(value)
             except (TypeError, ValueError) as exc:
                 raise ValidationError(f"Parameter '{name}' of alert '{key}' must be numeric") from exc
             if merged[name] < 0:
@@ -143,4 +224,12 @@ def normalize_params(key: str, params: Mapping[str, Any] | None) -> dict[str, An
         raise ValidationError("reference must be 'buy' or 'baseline'")
     if key == PERIOD_ELAPSED and not (merged.get("months") or merged.get("days")):
         raise ValidationError("period_elapsed requires 'months' or 'days'")
+    if key == MACD_CROSS and merged["fast"] >= merged["slow"]:
+        raise ValidationError("macd_cross requires fast < slow")
+    if key == REL_STRENGTH and merged.get("window") not in WINDOWS:
+        raise ValidationError(f"window must be one of {', '.join(WINDOWS)}")
+    if key == SMA_BREAK and merged.get("direction") not in {"above", "below"}:
+        raise ValidationError("sma_break requires direction 'above' or 'below'")
+    if key == MACD_CROSS and merged.get("direction") not in DIRECTIONS:
+        raise ValidationError(f"direction must be one of {', '.join(DIRECTIONS)}")
     return merged
