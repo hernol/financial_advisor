@@ -44,6 +44,62 @@ Para que el contenedor llegue a tu `llama-server` del host, la URL por defecto a
 Dentro de Docker poné `FA_DESKTOP_NOTIFICATIONS=false` (ya viene así en el compose):
 `notify-send` no tiene DBUS ahí.
 
+### Opción C — Postgres o Supabase
+
+Por defecto la base es un archivo SQLite en `./data` y no hace falta configurar nada. Si
+preferís Postgres — porque lo vas a hostear, o porque querés varias cuentas — alcanza con
+definir `DATABASE_URL`:
+
+```bash
+# en el .env
+DATABASE_URL=postgresql://usuario:clave@host:5432/basededatos
+```
+
+Con esa variable presente se usa Postgres; sin ella, SQLite. No hay nada más que cambiar:
+el esquema se crea solo la primera vez, igual que con SQLite.
+
+Necesitás el driver, que no viene por defecto para que el modo local no cargue con él:
+
+```bash
+pip install "psycopg[binary]"
+```
+
+Con **Supabase**, la URL sale de *Project Settings → Database → Connection string*. Usá la
+del **pooler en modo transacción** (puerto 6543), no la conexión directa: el chequeo
+periódico y la app abren conexiones cortas y seguidas, y la directa se queda sin cupo.
+
+Un detalle que conviene saber: en Postgres los payloads se guardan como `JSONB` nativo, así
+que se pueden consultar desde SQL sin parsear:
+
+```sql
+SELECT ticker, rsi, payload->>'trend' FROM indicator_snapshots ORDER BY taken_at DESC;
+```
+
+### Migraciones y respaldo
+
+El esquema tiene versión y se actualiza solo al abrir la base. Antes del primer cambio de
+una actualización, en SQLite se deja un respaldo al lado del archivo:
+
+```
+data/financial_analyzer.db.pre-v10.bak
+```
+
+Si venís de una versión anterior no tenés que hacer nada: la primera corrida migra y avisa
+en el log. Los datos existentes se conservan; ninguna migración borra nada.
+
+### Correr los tests contra los dos motores
+
+La suite corre contra SQLite por defecto. Para probar también Postgres:
+
+```bash
+docker compose --profile dev up -d postgres
+FA_TEST_DATABASE_URL=postgresql://fa:fa@localhost:55432/fa_test pytest
+docker compose --profile dev down          # cuando termines
+```
+
+El Postgres de dev es efímero a propósito (sin volumen): cada arranque es una base limpia.
+Cada test usa su propio esquema, así que quedan tan aislados como con un archivo temporal.
+
 ### Modelo local (opcional)
 
 Levantá tu servidor OpenAI-compatible (LM Studio → Developer → Start Server, o

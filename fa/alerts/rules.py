@@ -7,8 +7,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Callable, Mapping
 
-from fa.alerts import kinds
-from fa.alerts import rules_technical
+from fa.alerts import kinds, rules_technical
 from fa.indicators import detect_cross, drawdown_pct, rsi
 from fa.models import Alert, MarketContext, Position, Signal
 

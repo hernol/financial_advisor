@@ -60,6 +60,16 @@ class Settings:
     benchmark: str
     db_path: Path
     log_path: Path
+    database_url: str = ""
+
+    @property
+    def database_target(self) -> "Path | str":
+        """Where the data lives: a Postgres URL when set, the SQLite file if not.
+
+        This single choice is what separates a laptop install from a hosted one.
+        Nothing else in the application asks which engine it is talking to.
+        """
+        return self.database_url or self.db_path
 
     @property
     def local_ai_enabled(self) -> bool:
@@ -79,6 +89,7 @@ def load_settings() -> Settings:
     """Build settings from the environment."""
     db_path = Path(os.environ.get("FA_DB_PATH", DB_PATH))
     log_path = Path(os.environ.get("FA_LOG_PATH", LOG_PATH))
+    database_url = os.environ.get("DATABASE_URL", "").strip()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     return Settings(
@@ -99,4 +110,5 @@ def load_settings() -> Settings:
         benchmark=os.environ.get("FA_BENCHMARK", DEFAULT_BENCHMARK).upper(),
         db_path=db_path,
         log_path=log_path,
+        database_url=database_url,
     )

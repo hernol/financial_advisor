@@ -8,6 +8,8 @@ import pandas as pd
 from fa.alerts.engine import CheckReport
 from fa.models import Alert, Position
 from fa.portfolio import Holding, Portfolio
+from fa.store import alerts as alerts_store
+from fa.store import positions as positions_store
 from fa.ui.charts import draw_bar_chart, print_table
 from fa.ui.views import (
     portfolio_summary_for_ai,
@@ -17,8 +19,6 @@ from fa.ui.views import (
     render_portfolio,
     render_positions,
 )
-from fa.store import alerts as alerts_store
-from fa.store import positions as positions_store
 
 POSITION = Position(id=1, ticker="PODD", quantity=10, buy_price=100.0, buy_date=date(2026, 1, 1))
 

@@ -1,20 +1,30 @@
 """Persistence of fired alert events, price snapshots and AI analyses."""
 from __future__ import annotations
 
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 from fa.models import Quote, Signal
+from fa.store.database import Database
 from fa.store.serde import dump_json, load_json, to_iso
 
 
-def record_event(conn: sqlite3.Connection, signal: Signal, delivered: Sequence[str]) -> int:
-    cur = conn.execute(
-        "INSERT INTO alert_events(alert_id, ticker, kind, title, message, severity, payload, delivered, fired_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+def record_event(
+    conn: Database,
+    signal: Signal,
+    delivered: Sequence[str],
+    *,
+    run_id: int | None = None,
+    price: float | None = None,
+) -> int:
+    stamp = to_iso(datetime.now(timezone.utc))
+    new_id = conn.insert(
+        "INSERT INTO alert_events(alert_id, run_id, ticker, kind, title, message, severity, "
+        "payload, delivered, price, fired_at, updated_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             signal.alert.id,
+            run_id,
             signal.alert.ticker,
             signal.alert.kind,
             signal.title,
@@ -22,17 +32,19 @@ def record_event(conn: sqlite3.Connection, signal: Signal, delivered: Sequence[s
             signal.severity,
             dump_json(dict(signal.payload)),
             dump_json(list(delivered)),
-            to_iso(datetime.now(timezone.utc)),
+            price,
+            stamp,
+            stamp,
         ),
     )
     conn.commit()
-    return int(cur.lastrowid)
+    return new_id
 
 
-def recent_events(conn: sqlite3.Connection, limit: int = 20, *, unacknowledged_only: bool = False) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM alert_events"
+def recent_events(conn: Database, limit: int = 20, *, unacknowledged_only: bool = False) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM alert_events WHERE deleted_at IS NULL"
     if unacknowledged_only:
-        sql += " WHERE acknowledged_at IS NULL"
+        sql += " AND acknowledged_at IS NULL"
     sql += " ORDER BY fired_at DESC LIMIT ?"
     out: list[dict[str, Any]] = []
     for row in conn.execute(sql, (limit,)):
@@ -43,24 +55,63 @@ def recent_events(conn: sqlite3.Connection, limit: int = 20, *, unacknowledged_o
     return out
 
 
-def acknowledge_all(conn: sqlite3.Connection) -> int:
+def acknowledge_all(conn: Database) -> int:
+    stamp = to_iso(datetime.now(timezone.utc))
     cur = conn.execute(
-        "UPDATE alert_events SET acknowledged_at = ? WHERE acknowledged_at IS NULL",
-        (to_iso(datetime.now(timezone.utc)),),
+        "UPDATE alert_events SET acknowledged_at = ?, updated_at = ? WHERE acknowledged_at IS NULL",
+        (stamp, stamp),
     )
     conn.commit()
     return cur.rowcount
 
 
-def save_snapshot(conn: sqlite3.Connection, quote: Quote) -> None:
+def acknowledge(conn: Database, event_id: int) -> bool:
+    """Mark a single event as seen, which is what a phone actually does."""
+    stamp = to_iso(datetime.now(timezone.utc))
+    cur = conn.execute(
+        "UPDATE alert_events SET acknowledged_at = ?, updated_at = ? "
+        "WHERE id = ? AND acknowledged_at IS NULL",
+        (stamp, stamp, event_id),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def events_for_alert(
+    conn: Database, alert_id: int, limit: int = 100
+) -> list[dict[str, Any]]:
+    """Firing history of one alert; survives the alert being deleted."""
+    rows = conn.execute(
+        "SELECT * FROM alert_events WHERE alert_id = ? AND deleted_at IS NULL "
+        "ORDER BY fired_at DESC LIMIT ?",
+        (alert_id, limit),
+    )
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["payload"] = load_json(row["payload"], {})
+        item["delivered"] = load_json(row["delivered"], [])
+        out.append(item)
+    return out
+
+
+def save_snapshot(conn: Database, quote: Quote) -> None:
     conn.execute(
-        "INSERT INTO price_snapshots(ticker, price, source, taken_at) VALUES(?, ?, ?, ?)",
-        (quote.ticker, quote.price, quote.source, to_iso(quote.as_of)),
+        "INSERT INTO price_snapshots(ticker, price, source, taken_at, change_pct, previous_close) "
+        "VALUES(?, ?, ?, ?, ?, ?)",
+        (
+            quote.ticker,
+            quote.price,
+            quote.source,
+            to_iso(quote.as_of),
+            quote.change_pct,
+            quote.previous_close,
+        ),
     )
     conn.commit()
 
 
-def max_snapshot_since(conn: sqlite3.Connection, ticker: str, since: str) -> float | None:
+def max_snapshot_since(conn: Database, ticker: str, since: str) -> float | None:
     row = conn.execute(
         "SELECT MAX(price) AS peak FROM price_snapshots WHERE ticker = ? AND taken_at >= ?",
         (ticker.upper(), since),
@@ -69,17 +120,19 @@ def max_snapshot_since(conn: sqlite3.Connection, ticker: str, since: str) -> flo
 
 
 def save_analysis(
-    conn: sqlite3.Connection, ticker: str, model: str, metrics: str, context: str, report: str
+    conn: Database, ticker: str, model: str, metrics: str, context: str, report: str
 ) -> int:
-    cur = conn.execute(
-        "INSERT INTO analyses(ticker, model, metrics, context, report, created_at) VALUES(?, ?, ?, ?, ?, ?)",
-        (ticker.upper(), model, metrics, context, report, to_iso(datetime.now(timezone.utc))),
+    stamp = to_iso(datetime.now(timezone.utc))
+    new_id = conn.insert(
+        "INSERT INTO analyses(ticker, model, metrics, context, report, created_at, updated_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?)",
+        (ticker.upper(), model, metrics, context, report, stamp, stamp),
     )
     conn.commit()
-    return int(cur.lastrowid)
+    return new_id
 
 
-def recent_analyses(conn: sqlite3.Connection, ticker: str | None = None, limit: int = 10) -> list[Mapping[str, Any]]:
+def recent_analyses(conn: Database, ticker: str | None = None, limit: int = 10) -> list[Mapping[str, Any]]:
     if ticker:
         rows = conn.execute(
             "SELECT * FROM analyses WHERE ticker = ? ORDER BY created_at DESC LIMIT ?",

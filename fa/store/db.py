@@ -1,4 +1,14 @@
-"""SQLite connection handling and schema migrations."""
+"""Opening a database, in whichever engine this install is configured for.
+
+Two paths lead to the same schema. A database that does not exist yet gets
+:data:`fa.store.schema.SCHEMA` in one shot and is stamped at the current
+version; a database that already has tables walks the incremental migrations.
+That split is why Postgres never has to replay SQLite's history.
+
+:data:`BASELINE` is the schema exactly as it shipped at version 2. It is frozen
+and only ever used by databases created back then, plus the tests that prove
+those still upgrade cleanly.
+"""
 from __future__ import annotations
 
 import sqlite3
@@ -6,9 +16,12 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 2
+from fa.store import migrations, schema
+from fa.store.database import Database, PostgresDatabase, SqliteDatabase, render_ddl
 
-SCHEMA = """
+SCHEMA_VERSION = migrations.TARGET_VERSION
+
+BASELINE = """
 CREATE TABLE IF NOT EXISTS positions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker        TEXT    NOT NULL,
@@ -97,34 +110,74 @@ CREATE TABLE IF NOT EXISTS meta (
 """
 
 
-def connect(db_path: Path | str) -> sqlite3.Connection:
-    """Open a connection with sane defaults and the schema applied."""
-    path = Path(db_path)
+def is_postgres_url(target: object) -> bool:
+    return str(target).startswith(("postgres://", "postgresql://"))
+
+
+def connect(target: Path | str) -> Database:
+    """Open the database named by a path or a Postgres URL, fully migrated."""
+    if is_postgres_url(target):
+        db: Database = PostgresDatabase(str(target))
+        migrate(db)
+        return db
+
+    path = Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), detect_types=sqlite3.PARSE_DECLTYPES)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
-    migrate(conn)
-    return conn
+    sqlite_db = SqliteDatabase(conn, path)
+    migrate(sqlite_db)
+    conn.execute("PRAGMA foreign_keys = ON")
+    return sqlite_db
 
 
-def migrate(conn: sqlite3.Connection) -> None:
-    """Apply the schema; safe to call on every start."""
-    conn.executescript(SCHEMA)
-    conn.execute(
-        "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (str(SCHEMA_VERSION),),
-    )
-    conn.commit()
+def migrate(db: Database) -> None:
+    """Bring the database to the current version, whichever state it is in.
+
+    Safe to call on every start: an up-to-date database does no work.
+    """
+    if _is_empty(db):
+        _create(db)
+        return
+    if not db.table_exists("meta"):
+        # A version 2 database predates the meta table only in theory, but a
+        # missing stamp must not be read as "brand new" and wipe nothing.
+        db.executescript(render_ddl(BASELINE, db.dialect))
+    _stamp_if_unstamped(db, migrations.BASELINE_VERSION)
+    db.commit()
+    migrations.run(db)
+
+
+def _is_empty(db: Database) -> bool:
+    """True when nothing has ever been created here."""
+    return not db.table_exists("positions") and not db.table_exists("meta")
+
+
+def _create(db: Database) -> None:
+    """Fresh install: the whole current schema at once, then stamp it."""
+    db.executescript(render_ddl(schema.SCHEMA, db.dialect))
+    db.commit()
+    migrations.ensure_local_account(db)
+    db.commit()
+    _stamp_if_unstamped(db, migrations.TARGET_VERSION)
+    db.commit()
+
+
+def _stamp_if_unstamped(db: Database, version: int) -> None:
+    if migrations.current_version(db) == 0:
+        db.execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(version),),
+        )
 
 
 @contextmanager
-def session(db_path: Path | str) -> Iterator[sqlite3.Connection]:
-    """Context manager yielding a ready connection, always closed afterwards."""
-    conn = connect(db_path)
+def session(target: Path | str) -> Iterator[Database]:
+    """Context manager yielding a ready database, always closed afterwards."""
+    db = connect(target)
     try:
-        yield conn
+        yield db
     finally:
-        conn.close()
+        db.close()

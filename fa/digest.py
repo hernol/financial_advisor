@@ -1,7 +1,6 @@
 """Portfolio digest: gathers the facts, the local model writes the prose."""
 from __future__ import annotations
 
-import sqlite3
 from datetime import date, datetime, timezone
 from typing import Sequence
 
@@ -13,6 +12,7 @@ from fa.portfolio import build_portfolio
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
 from fa.store import positions as positions_store
+from fa.store.database import Database
 
 
 def _distance_to_trigger(alert: Alert, price: float, position: Position | None) -> str | None:
@@ -35,7 +35,7 @@ def _distance_to_trigger(alert: Alert, price: float, position: Position | None) 
 
 
 def collect_facts(
-    conn: sqlite3.Connection, market: MarketService, *, today: date | None = None
+    conn: Database, market: MarketService, *, today: date | None = None
 ) -> str:
     """Plain-text fact sheet. Only real data; gaps are stated as such."""
     moment = today or datetime.now(timezone.utc).date()

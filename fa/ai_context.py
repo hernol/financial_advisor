@@ -12,8 +12,8 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
-from fa.indicators import rsi, sma
 from fa.analytics import build_snapshot
+from fa.indicators import rsi, sma
 from fa.models import Alert, MarketContext, Position
 
 FRESHNESS_RULES = """\

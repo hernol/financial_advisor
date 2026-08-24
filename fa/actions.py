@@ -1,6 +1,7 @@
 """High level operations shared by the CLI and the interactive menu."""
 from __future__ import annotations
 
+import logging
 from datetime import date
 from typing import Any, Mapping
 
@@ -12,16 +13,19 @@ from fa.alerts import kinds
 from fa.alerts.engine import CheckReport, run_checks
 from fa.alerts.suggestions import actionable
 from fa.app import App
-from fa.errors import ValidationError
 from fa.digest import collect_facts
+from fa.errors import ValidationError
 from fa.local_tasks import extract_claims, portfolio_digest
 from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
 from fa.models import AIReport, Alert, MarketContext, Position, Quote, Suggestion
+from fa.portfolio import build_portfolio
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
 from fa.store import positions as positions_store
 from fa.store import suggestions as suggestions_store
 from fa.ui.charts import draw_bar_chart, print_table
+
+logger = logging.getLogger(__name__)
 
 
 def snapshot_text(quote: Quote) -> str:
@@ -227,8 +231,25 @@ def _resolve_reference(
     return {**params, "baseline_price": quote.price}
 
 
-def check_alerts(app: App, ticker: str | None = None) -> CheckReport:
-    return run_checks(app.conn, app.market, app.dispatcher, ticker=ticker)
+def check_alerts(app: App, ticker: str | None = None, *, trigger: str = "manual") -> CheckReport:
+    """Run the alert check and, on a full sweep, stamp the equity curve.
+
+    The valuation rides along with the scheduled run because that is the only
+    thing guaranteed to happen on a timer. Left to the ``portfolio`` command the
+    curve would only have points on the days somebody happened to look.
+    """
+    report = run_checks(app.conn, app.market, app.dispatcher, ticker=ticker, trigger=trigger)
+    if ticker is None:
+        record_valuation(app)
+    return report
+
+
+def record_valuation(app: App) -> None:
+    """Add a point to the equity curve, never at the cost of the run itself."""
+    try:
+        build_portfolio(app.conn, app.market)
+    except Exception:  # noqa: BLE001 - the curve must never break a check
+        logger.exception("could not record the portfolio valuation")
 
 
 def adjust_for_split(app: App, position_id: int, ratio: float) -> Position:
@@ -238,10 +259,7 @@ def adjust_for_split(app: App, position_id: int, ratio: float) -> Position:
     position = positions_store.get_position(app.conn, position_id)
     if position is None:
         raise ValidationError(f"No existe la posición {position_id}.")
-    positions_store.update_buy_price(
-        app.conn, position_id, position.buy_price / ratio, position.quantity * ratio
-    )
-    updated = positions_store.get_position(app.conn, position_id)
+    updated = positions_store.apply_split(app.conn, position_id, ratio)
     assert updated is not None  # noqa: S101 - just re-read the row we wrote
     return updated
 

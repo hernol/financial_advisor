@@ -10,15 +10,15 @@ from fa import actions
 from fa.alerts import kinds
 from fa.analytics import build_snapshot
 from fa.analytics import to_payload as analytics_payload
-from fa.config import ANALYSIS_HISTORY_PERIOD
 from fa.app import App, build_app, configure_logging
+from fa.config import ANALYSIS_HISTORY_PERIOD
 from fa.errors import FinancialAnalyzerError
+from fa.localai import LocalAIError
 from fa.portfolio import build_portfolio
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
 from fa.store import meta as meta_store
 from fa.store import positions as positions_store
-from fa.localai import LocalAIError
 from fa.ui import menu
 from fa.ui.suggestions_ui import review
 from fa.ui.technicals import render as render_technicals
@@ -44,6 +44,11 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--quiet", action="store_true", help="no imprime las alertas, sólo las envía")
     check.add_argument("--json", action="store_true", help="salida JSON del resumen")
     check.add_argument("--ticker", default=None, help="limita el chequeo a un ticker")
+    check.add_argument(
+        "--trigger",
+        default="manual",
+        help="quién disparó la corrida (timer, manual, api); queda en el historial",
+    )
 
     use = sub.add_parser("use", help="fija el ticker activo para los próximos comandos")
     use.add_argument("ticker")
@@ -118,11 +123,16 @@ def _parse_params(pairs: list[str]) -> dict[str, str]:
 
 
 def _cmd_check(app: App, args: argparse.Namespace) -> int:
-    report = actions.check_alerts(app, args.ticker.upper() if args.ticker else None)
+    report = actions.check_alerts(
+        app,
+        args.ticker.upper() if args.ticker else None,
+        trigger=getattr(args, "trigger", "manual"),
+    )
     if args.json:
         print(
             json.dumps(
                 {
+                    "run_id": report.run_id,
                     "checked": report.checked,
                     "fired": [
                         {"ticker": s.alert.ticker, "kind": s.alert.kind, "title": s.title, "message": s.message}
@@ -248,7 +258,9 @@ def _cmd_kinds(args: argparse.Namespace) -> int:
 
 
 def _cmd_suggestions(app: App, args: argparse.Namespace) -> int:
-    from fa.store import suggestions as suggestions_store  # noqa: PLC0415 - keeps startup light
+    from fa.store import (
+        suggestions as suggestions_store,  # noqa: PLC0415 - keeps startup light
+    )
 
     ticker = args.ticker.upper() if args.ticker else None
     items = suggestions_store.list_suggestions(app.conn, ticker=ticker, status=args.status)

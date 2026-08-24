@@ -13,6 +13,7 @@ from fa.localai import LocalAIClient
 from fa.market import MarketService
 from fa.notify.dispatcher import Dispatcher, build_dispatcher
 from fa.providers.chain import build_chain
+from fa.store.database import Database
 from fa.store.db import connect
 
 
@@ -21,7 +22,7 @@ class App:
     """Everything the commands need, built once per process."""
 
     settings: Settings
-    conn: sqlite3.Connection
+    conn: Database
     market: MarketService
     dispatcher: Dispatcher
     local_ai: LocalAIClient
@@ -39,7 +40,7 @@ def build_app(*, echo_notifications: bool = True) -> Iterator[App]:
     """Create the application context and always close the database."""
     settings = load_settings()
     try:
-        conn = connect(settings.db_path)
+        conn = connect(settings.database_target)
     except sqlite3.OperationalError as exc:
         # Typically a database left behind by a root-owned container run.
         raise ConfigError(

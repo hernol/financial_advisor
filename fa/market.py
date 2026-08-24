@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
+import time
 from datetime import date, datetime, timezone
 from typing import Sequence
 
@@ -14,6 +14,9 @@ from fa.metrics import build_tables
 from fa.models import Fundamentals, MarketContext, PricePoint, Quote
 from fa.providers.chain import ProviderChain
 from fa.store import events as events_store
+from fa.store import history as history_store
+from fa.store import runs as runs_store
+from fa.store.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ class MarketService:
     def __init__(
         self,
         chain: ProviderChain,
-        conn: sqlite3.Connection | None = None,
+        conn: Database | None = None,
         benchmark: str = DEFAULT_BENCHMARK,
     ) -> None:
         self._chain = chain
@@ -58,10 +61,46 @@ class MarketService:
         return self._chain.names
 
     def quote(self, ticker: str) -> Quote:
-        quote = self._chain.get_quote(ticker)
+        started = time.monotonic()
+        try:
+            quote = self._chain.get_quote(ticker)
+        except DataUnavailableError as exc:
+            self._log_fetch(ticker, "quote", "", started, error=exc)
+            raise
+        self._log_fetch(ticker, "quote", quote.source, started)
         if self._conn is not None:
             events_store.save_snapshot(self._conn, quote)
         return quote
+
+    def _log_fetch(
+        self,
+        ticker: str,
+        kind: str,
+        provider: str,
+        started: float,
+        *,
+        error: Exception | None = None,
+    ) -> None:
+        """Record which provider answered, so a silent fallback stays visible.
+
+        The chain tries Yahoo first and drops to Alpha Vantage or Finnhub when it
+        fails. Without this the only evidence a fallback happened was a different
+        ``source`` string on one quote, which nothing kept.
+        """
+        if self._conn is None:
+            return
+        try:
+            runs_store.record_fetch(
+                self._conn,
+                ticker=ticker,
+                kind=kind,
+                provider=provider,
+                ok=error is None,
+                error=str(error) if error else "",
+                duration_ms=int((time.monotonic() - started) * 1000),
+            )
+        except Exception:  # noqa: BLE001 - provenance must never break a fetch
+            logger.exception("could not record the %s fetch for %s", kind, ticker)
 
     def context(
         self, ticker: str, *, since: date | None = None, period: str = DEFAULT_HISTORY_PERIOD
@@ -72,10 +111,15 @@ class MarketService:
             return self._contexts[key]
         symbol = ticker.upper()
         quote = self.quote(symbol)
+        started = time.monotonic()
         try:
             history = self._chain.get_history(symbol, period)
-        except DataUnavailableError:
+        except DataUnavailableError as exc:
+            self._log_fetch(symbol, "history", "", started, error=exc)
             history = ()
+        else:
+            self._log_fetch(symbol, "history", quote.source, started)
+            self._archive(symbol, history, quote.source)
         lookback = since or date.today().replace(year=date.today().year - 1)
         context = MarketContext(
             ticker=symbol,
@@ -90,6 +134,15 @@ class MarketService:
         )
         self._contexts[key] = context
         return context
+
+    def _archive(self, ticker: str, history: Sequence[PricePoint], source: str) -> None:
+        """Keep the bars the provider just sent, so the next run need not refetch."""
+        if self._conn is None or not history:
+            return
+        try:
+            history_store.save_bars(self._conn, ticker, history, source)
+        except Exception:  # noqa: BLE001 - archiving must never break a fetch
+            logger.exception("could not archive bars for %s", ticker)
 
     def fundamentals(self, ticker: str) -> Fundamentals:
         return self._chain.get_fundamentals(ticker)
