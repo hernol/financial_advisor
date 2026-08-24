@@ -109,6 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
     dig.add_argument("--facts-only", action="store_true", help="sólo los datos, sin pasar por la IA")
 
     sub.add_parser("local-ai", help="diagnostica la conexión con el modelo local")
+
+    serve = sub.add_parser("serve", help="levanta la API y el dashboard web")
+    serve.add_argument("--host", default="127.0.0.1", help="127.0.0.1 no sale de la máquina")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--reload", action="store_true", help="recarga al editar (desarrollo)")
     return parser
 
 
@@ -120,6 +125,30 @@ def _parse_params(pairs: list[str]) -> dict[str, str]:
         key, value = pair.split("=", 1)
         params[key.strip()] = value.strip()
     return params
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the API and the web client on one port.
+
+    Bound to localhost by default: there is no authentication yet, so exposing
+    it on 0.0.0.0 would publish the portfolio to the network.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "⚠️  Falta el servidor web. Instalá:\n"
+            '   pip install "fastapi>=0.115" "uvicorn[standard]>=0.32"'
+        )
+        return 1
+    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+        print(
+            f"⚠️  Escuchando en {args.host}: la API todavía no tiene autenticación.\n"
+            "   Cualquiera que llegue a ese puerto ve la cartera entera."
+        )
+    print(f"📊 Dashboard en http://{args.host}:{args.port}  (Ctrl+C para cortar)")
+    uvicorn.run("fa.api.app:app", host=args.host, port=args.port, reload=args.reload)
+    return 0
 
 
 def _cmd_check(app: App, args: argparse.Namespace) -> int:
@@ -306,6 +335,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "kinds":  # does not need providers or the database
         return _cmd_kinds(args)
+    if args.command == "serve":
+        # The server opens its own database when it starts, and it must not
+        # inherit a connection that this process would close on the way out.
+        return _cmd_serve(args)
 
     # JSON output must stay machine readable, so the console channel keeps quiet.
     echo = not (getattr(args, "quiet", False) or getattr(args, "json", False))

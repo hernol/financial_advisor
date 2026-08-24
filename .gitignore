@@ -55,3 +55,7 @@ Thumbs.db
 # Local, machine-specific permissions; the shared .claude/settings.json (if it
 # is ever added) stays tracked.
 .claude/settings.local.json
+
+# --- Playwright MCP --------------------------------------------------------
+# Capturas y snapshots que deja el navegador durante la verificación.
+.playwright-mcp/

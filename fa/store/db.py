@@ -114,8 +114,15 @@ def is_postgres_url(target: object) -> bool:
     return str(target).startswith(("postgres://", "postgresql://"))
 
 
-def connect(target: Path | str) -> Database:
-    """Open the database named by a path or a Postgres URL, fully migrated."""
+def connect(target: Path | str, *, threadsafe: bool = False) -> Database:
+    """Open the database named by a path or a Postgres URL, fully migrated.
+
+    ``threadsafe`` lifts SQLite's same-thread check, which the API server needs
+    because uvicorn runs sync endpoints on a worker pool. SQLite itself
+    serialises access; what the caller still owes is not interleaving two
+    transactions, which the API does with a lock. Leave it off everywhere else:
+    the check catches genuine mistakes.
+    """
     if is_postgres_url(target):
         db: Database = PostgresDatabase(str(target))
         migrate(db)
@@ -123,7 +130,9 @@ def connect(target: Path | str) -> Database:
 
     path = Path(target)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), detect_types=sqlite3.PARSE_DECLTYPES)
+    conn = sqlite3.connect(
+        str(path), detect_types=sqlite3.PARSE_DECLTYPES, check_same_thread=not threadsafe
+    )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     sqlite_db = SqliteDatabase(conn, path)

@@ -44,7 +44,9 @@ requires_postgres = pytest.mark.skipif(
 def conn(tmp_path):
     """A migrated, empty database on whichever engine is under test."""
     if not TEST_DATABASE_URL:
-        database = connect(tmp_path / "test.db")
+        # threadsafe so the same connection can back a TestClient, which runs
+        # the application on a worker thread.
+        database = connect(tmp_path / "test.db", threadsafe=True)
         yield database
         database.close()
         return

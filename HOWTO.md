@@ -384,7 +384,52 @@ Al abrir el menú interactivo te muestra primero las alertas que todavía no mar
 
 ---
 
-## 6. Análisis
+## 6. Dashboard web
+
+Un servidor con la API y la app móvil en el mismo puerto. Lee **sólo lo que ya está
+guardado**: no sale a pedir precios, así que abrir la pantalla no dispara ninguna descarga
+y funciona aunque yfinance esté caído.
+
+```bash
+pip install "fastapi>=0.115" "uvicorn[standard]>=0.32"
+python financial_analyzer.py serve
+# → http://127.0.0.1:8000
+```
+
+Con Docker:
+
+```bash
+docker compose run --rm --service-ports analyzer serve --host 0.0.0.0
+```
+
+**Escucha en 127.0.0.1 a propósito: todavía no hay autenticación.** Si la exponés en
+`0.0.0.0`, cualquiera que llegue a ese puerto ve la cartera entera. Para usarla desde el
+celular, lo prolijo es una VPN tipo Tailscale, no abrir el puerto en el router.
+
+### Instalarla en el celular
+
+Es una PWA: se instala sin tienda. Abrí la URL en el navegador del teléfono y usá
+*Agregar a pantalla de inicio* (Chrome: menú ⋮ → Instalar app; Safari: Compartir →
+Agregar a inicio). Queda como una app más, a pantalla completa.
+
+### Qué muestra
+
+La pantalla de un ticker, con tres pestañas:
+
+| Pestaña | Contenido |
+|---|---|
+| **Precio** | Cierres con SMA50 y SMA200, ventanas de 1M a 5A, y la grilla de indicadores |
+| **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
+| **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
+
+El indicador del encabezado dice hace cuánto corrió el último chequeo. Si dice `sin
+corridas` o se pone amarillo, los números que estás viendo son viejos: eso es más
+importante que los números mismos.
+
+La pestaña *Indicador* arranca vacía en una instalación nueva. Cada corrida de
+`check-alerts` agrega un punto; después de unos días hay serie para mirar.
+
+## 7. Análisis
 
 ```bash
 # Métricas anuales y trimestrales reales (balance, FCF, EV, yields)
@@ -477,7 +522,7 @@ número, y lo que no pudimos traer va en una sección **MISSING DATA** con la or
 Si ves `faltantes: N` alto, el reporte se hizo con huecos: fijate la sección "Verificación de
 datos" del informe, que dice explícitamente con qué se quedó corto.
 
-## 7. Sugerencias de la IA
+## 8. Sugerencias de la IA
 
 El reporte devuelve, además del texto, un bloque estructurado con **alertas y acciones
 sugeridas**. Quedan guardadas como pendientes y se aplican de a una:
@@ -506,7 +551,7 @@ earnings") se listan igual pero no se convierten en alerta: quedan como recordat
 modelo propone un tipo de alerta que no existe, o con parámetros inválidos, se degrada a acción
 en vez de perderse.
 
-## 8. Digest del portfolio (modelo local)
+## 9. Digest del portfolio (modelo local)
 
 ```bash
 .venv/bin/python financial_analyzer.py digest              # resumen redactado
@@ -523,7 +568,7 @@ crudos y sale con código 2. Cron-eable para tener el resumen cada mañana:
 
 ---
 
-## 9. Menú interactivo
+## 10. Menú interactivo
 
 ```bash
 .venv/bin/python financial_analyzer.py
@@ -542,7 +587,7 @@ La opción 1 abre el workspace por ticker descripto en la sección 3.
 
 ---
 
-## 10. Casos puntuales
+## 11. Casos puntuales
 
 **Hubo un split y tu costo quedó mal** → menú opción 11, o mirá lo que sugirió la alerta
 `split_detected`. Ratio `4` = 4-for-1: divide el precio de compra por 4 y multiplica la cantidad
@@ -565,7 +610,7 @@ sqlite3 data/financial_analyzer.db "SELECT ticker, kind, params, last_fired_at F
 
 ---
 
-## 11. Si algo falla
+## 12. Si algo falla
 
 | Síntoma | Causa / arreglo |
 |---|---|
