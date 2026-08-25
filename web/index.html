@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#020617">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Financial Analyzer</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon.svg">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/vendor/uPlot.min.css">
+<link rel="stylesheet" href="/static/styles.css?v={ASSETS}">
+</head>
+<body>
+
+<!-- Icons are inline SVG symbols: no icon font, no emoji standing in for one. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 18l-6-6 6-6"/>
+  </symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/>
+  </symbol>
+  <symbol id="i-wallet" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H18a2 2 0 0 1 2 2v1"/>
+    <path d="M3 7.5V17a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-2"/>
+    <path d="M21 10h-4a2.5 2.5 0 0 0 0 5h4z"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round">
+    <path d="M12 5v14M5 12h14"/>
+  </symbol>
+  <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2" stroke-linecap="round">
+    <path d="M18 6 6 18M6 6l12 12"/>
+  </symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M20 6 9 17l-5-5"/>
+  </symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>
+  </symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 19V5"/><path d="M4 19h16"/>
+    <path d="M8 16v-5"/><path d="M13 16V8"/><path d="M18 16v-3"/>
+  </symbol>
+</svg>
+
+<section id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <svg class="gate-mark" viewBox="0 0 512 512" aria-hidden="true">
+      <polyline points="96,344 192,240 272,304 416,160" fill="none" stroke="currentColor"
+                stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="416" cy="160" r="30" fill="currentColor"/>
+    </svg>
+    <h1>Financial Analyzer</h1>
+    <p id="gate-lead" class="gate-lead"></p>
+    <form id="gate-form">
+      <div id="gate-fields"></div>
+      <p id="gate-error" class="sheet-error" hidden></p>
+      <button type="submit" class="btn primary" id="gate-submit">Entrar</button>
+    </form>
+  </div>
+</section>
+
+<header class="top">
+  <button id="back" class="icon-btn" hidden aria-label="Volver a la lista">
+    <svg aria-hidden="true"><use href="#i-back"/></svg>
+  </button>
+  <h1 id="title">Tickers</h1>
+  <button id="status" class="status" type="button" aria-live="polite"
+          title="Estado del chequeo periódico">
+    <span class="dot" aria-hidden="true"></span><span id="status-text">…</span>
+  </button>
+</header>
+
+<main id="main">
+
+  <section id="view-portfolio" class="view" aria-label="Cartera" hidden>
+    <div class="head">
+      <p class="kicker">Valor de cartera</p>
+      <div class="head-price">
+        <span id="p-value" class="big tnum">—</span>
+        <span id="p-delta" class="delta tnum"></span>
+      </div>
+      <p id="p-basis" class="coverage"></p>
+    </div>
+
+    <div id="p-unpriced" class="notice warn" hidden></div>
+
+    <div id="p-curve-box">
+      <div id="p-curve" class="chart"></div>
+      <div class="legend" id="p-curve-legend"></div>
+    </div>
+
+    <dl id="p-totals" class="stats"></dl>
+
+    <h2 class="section-h">Tenencias</h2>
+    <ul id="holding-list" class="cards"></ul>
+
+    <div class="section-head">
+      <h2 class="section-h">Movimientos</h2>
+      <button id="add-tx" class="add" type="button">
+        <svg aria-hidden="true"><use href="#i-plus"/></svg> Cargar
+      </button>
+    </div>
+    <ul id="tx-list" class="cards"></ul>
+
+    <p id="p-empty" class="notice" hidden>
+      No hay posiciones cargadas. Registrá una compra con
+      <code>add-position</code> y aparece acá.
+    </p>
+  </section>
+
+  <section id="view-list" class="view" aria-label="Tickers seguidos" hidden>
+    <ul id="ticker-list" class="cards grid2"></ul>
+    <p id="list-empty" class="notice" hidden>
+      Todavía no hay nada seguido. Cargá una posición o una alerta desde la
+      terminal y corré <code>check-alerts</code>.
+    </p>
+  </section>
+
+  <section id="view-detail" class="view" hidden>
+    <div class="head">
+      <div class="head-price">
+        <span id="d-price" class="big tnum">—</span>
+        <span id="d-delta" class="delta tnum"></span>
+        <span id="d-trend" class="chip solid"></span>
+      </div>
+      <p id="d-coverage" class="coverage"></p>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="Vistas del ticker">
+      <button class="tab" data-tab="chart" role="tab" aria-selected="true"
+              aria-controls="tab-chart" id="tabbtn-chart">Precio</button>
+      <button class="tab" data-tab="indicator" role="tab" aria-selected="false"
+              aria-controls="tab-indicator" id="tabbtn-indicator">Indicador</button>
+      <button class="tab" data-tab="alerts" role="tab" aria-selected="false"
+              aria-controls="tab-alerts" id="tabbtn-alerts">Alertas</button>
+    </div>
+
+    <div id="tab-chart" class="panel" role="tabpanel" aria-labelledby="tabbtn-chart">
+      <div class="ranges" id="ranges" role="group" aria-label="Ventana de tiempo"></div>
+      <div id="chart" class="chart"></div>
+      <div class="legend" id="chart-legend"></div>
+      <dl id="stats" class="stats"></dl>
+    </div>
+
+    <div id="tab-indicator" class="panel" role="tabpanel" aria-labelledby="tabbtn-indicator" hidden>
+      <label class="field" for="series-pick">
+        <span>Serie histórica</span>
+        <select id="series-pick"></select>
+      </label>
+      <div id="chart2" class="chart"></div>
+      <p class="note" id="series-note"></p>
+    </div>
+
+    <div id="tab-alerts" class="panel" role="tabpanel" aria-labelledby="tabbtn-alerts" hidden>
+      <div class="section-head">
+        <h2 class="section-h">Reglas</h2>
+        <button id="add-alert" class="add" type="button">
+          <svg aria-hidden="true"><use href="#i-plus"/></svg> Nueva
+        </button>
+      </div>
+      <ul id="alert-list" class="cards"></ul>
+      <h2 class="section-h">Disparos</h2>
+      <ul id="event-list" class="cards"></ul>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottom" aria-label="Secciones">
+  <button class="nav-item" data-view="portfolio" aria-current="page">
+    <svg aria-hidden="true"><use href="#i-wallet"/></svg>
+    <span>Cartera</span>
+  </button>
+  <button class="nav-item" data-view="tickers">
+    <svg aria-hidden="true"><use href="#i-chart"/></svg>
+    <span>Tickers</span>
+  </button>
+</nav>
+
+<button id="logout" class="logout" type="button" hidden>Cerrar sesión</button>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <form id="sheet-form" method="dialog">
+    <header class="sheet-head">
+      <h2 id="sheet-title">…</h2>
+      <button type="button" id="sheet-close" class="icon-btn" aria-label="Cerrar">
+        <svg aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </header>
+    <div id="sheet-body" class="sheet-body"></div>
+    <p id="sheet-error" class="sheet-error" role="alert" hidden></p>
+    <footer class="sheet-foot">
+      <button type="button" id="sheet-cancel" class="btn ghost">Cancelar</button>
+      <button type="submit" id="sheet-save" class="btn primary">Guardar</button>
+    </footer>
+  </form>
+</dialog>
+
+<p id="error" class="toast" role="alert" hidden></p>
+
+<script src="/static/vendor/uPlot.iife.min.js"></script>
+<script src="/static/app.js?v={ASSETS}"></script>
+</body>
+</html>

@@ -14,7 +14,13 @@ from fa.store import suggestions as suggestions_store
 from fa.ui.charts import clear_screen
 from fa.ui.prompts import ask, ask_date, ask_float, ask_int, ask_yes_no
 from fa.ui.suggestions_ui import review
-from fa.ui.views import SEPARATOR, render_alerts, render_check_report, render_events, render_positions
+from fa.ui.views import (
+    SEPARATOR,
+    render_alerts,
+    render_check_report,
+    render_events,
+    render_positions,
+)
 
 MENU = """
  1. Análisis anual (YtoY)          6. Cargar compra
@@ -94,7 +100,9 @@ def _quarterly(app: App, ticker: str) -> None:
 
 
 def _ai_report(app: App, ticker: str) -> None:
-    from fa.ui.prompts import read_multiline  # noqa: PLC0415 - keeps the import graph flat
+    from fa.ui.prompts import (
+        read_multiline,  # noqa: PLC0415 - keeps the import graph flat
+    )
 
     external = read_multiline(
         "\n📥 [OPCIONAL] Pegá el texto/recomendación de tu app de inversión "

@@ -5,6 +5,13 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Mapping, Sequence
 
+BUY = "buy"
+SELL = "sell"
+SPLIT = "split"
+DIVIDEND = "dividend"
+FEE = "fee"
+TRANSACTION_KINDS = (BUY, SELL, SPLIT, DIVIDEND, FEE)
+
 
 @dataclass(frozen=True)
 class Quote:
@@ -71,6 +78,13 @@ class Position:
     id: int | None = None
     closed_at: datetime | None = None
     created_at: datetime | None = None
+    close_price: float | None = None
+    close_date: date | None = None
+    realized_pnl: float | None = None
+
+    @property
+    def is_closed(self) -> bool:
+        return self.closed_at is not None
 
     @property
     def cost_basis(self) -> float:
@@ -83,6 +97,60 @@ class Position:
 
     def with_id(self, position_id: int) -> "Position":
         return replace(self, id=position_id)
+
+
+@dataclass(frozen=True)
+class Transaction:
+    """One immutable entry in the ledger.
+
+    Positions are a rollup of these rows, never the other way round: a split
+    that rewrites a position's cost basis leaves its original purchase intact
+    here, so the real history is always recoverable.
+    """
+
+    ticker: str
+    kind: str  # buy | sell | split | dividend | fee
+    trade_date: date
+    quantity: float | None = None
+    price: float | None = None
+    amount: float | None = None
+    ratio: float | None = None
+    fees: float = 0.0
+    currency: str = "USD"
+    note: str = ""
+    source: str = "manual"  # manual | import | split_detected
+    position_id: int | None = None
+    id: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+    @property
+    def signed_quantity(self) -> float:
+        """Shares added to (or removed from) the holding by this entry."""
+        if self.kind == BUY:
+            return self.quantity or 0.0
+        if self.kind == SELL:
+            return -(self.quantity or 0.0)
+        return 0.0
+
+    @property
+    def cash_flow(self) -> float:
+        """Signed cash impact: negative when money leaves the account."""
+        if self.amount is not None:
+            return self.amount
+        gross = (self.quantity or 0.0) * (self.price or 0.0)
+        if self.kind == BUY:
+            return -(gross + self.fees)
+        if self.kind == SELL:
+            return gross - self.fees
+        if self.kind == DIVIDEND:
+            return gross - self.fees
+        if self.kind == FEE:
+            return -self.fees
+        return 0.0
+
+    def with_id(self, transaction_id: int) -> "Transaction":
+        return replace(self, id=transaction_id)
 
 
 @dataclass(frozen=True)

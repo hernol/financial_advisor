@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
+import secrets
 import sys
 from datetime import date
 
@@ -10,15 +12,15 @@ from fa import actions
 from fa.alerts import kinds
 from fa.analytics import build_snapshot
 from fa.analytics import to_payload as analytics_payload
-from fa.config import ANALYSIS_HISTORY_PERIOD
 from fa.app import App, build_app, configure_logging
+from fa.config import ANALYSIS_HISTORY_PERIOD
 from fa.errors import FinancialAnalyzerError
+from fa.localai import LocalAIError
 from fa.portfolio import build_portfolio
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
 from fa.store import meta as meta_store
 from fa.store import positions as positions_store
-from fa.localai import LocalAIError
 from fa.ui import menu
 from fa.ui.suggestions_ui import review
 from fa.ui.technicals import render as render_technicals
@@ -44,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     check.add_argument("--quiet", action="store_true", help="no imprime las alertas, sólo las envía")
     check.add_argument("--json", action="store_true", help="salida JSON del resumen")
     check.add_argument("--ticker", default=None, help="limita el chequeo a un ticker")
+    check.add_argument(
+        "--trigger",
+        default="manual",
+        help="quién disparó la corrida (timer, manual, api); queda en el historial",
+    )
 
     use = sub.add_parser("use", help="fija el ticker activo para los próximos comandos")
     use.add_argument("ticker")
@@ -104,6 +111,21 @@ def build_parser() -> argparse.ArgumentParser:
     dig.add_argument("--facts-only", action="store_true", help="sólo los datos, sin pasar por la IA")
 
     sub.add_parser("local-ai", help="diagnostica la conexión con el modelo local")
+
+    serve = sub.add_parser("serve", help="levanta la API y el dashboard web")
+    serve.add_argument("--host", default="127.0.0.1", help="127.0.0.1 no sale de la máquina")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument("--reload", action="store_true", help="recarga al editar (desarrollo)")
+    serve.add_argument(
+        "--lan",
+        action="store_true",
+        help="escucha en toda la red local y muestra la URL para el celular",
+    )
+    serve.add_argument(
+        "--insecure",
+        action="store_true",
+        help="permite --lan sin token (no lo uses en una red compartida)",
+    )
     return parser
 
 
@@ -117,12 +139,112 @@ def _parse_params(pairs: list[str]) -> dict[str, str]:
     return params
 
 
+def _lan_address() -> str:
+    """The address this machine answers on in the local network.
+
+    Opening a socket to a public address does not send anything; it just asks
+    the routing table which interface would be used, which is the only reliable
+    way to pick the right one on a machine with several.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 53))  # TEST-NET-1, never routed anywhere
+        return probe.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        probe.close()
+
+
+def _in_container() -> bool:
+    """True when this process is inside a container.
+
+    Matters because binding 0.0.0.0 there is not exposure: it is the only way
+    to be reachable at all, and what actually decides who can reach it is the
+    port mapping on the host, which this process cannot see.
+    """
+    if pathlib.Path("/.dockerenv").exists():
+        return True
+    try:
+        return "docker" in pathlib.Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the API and the web client on one port.
+
+    Bound to localhost unless asked otherwise. Leaving that requires a token,
+    because everything the dashboard shows and everything it can change is
+    reachable by anyone who can open the port.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "⚠️  Falta el servidor web. Instalá:\n"
+            '   pip install "fastapi>=0.115" "uvicorn[standard]>=0.32"'
+        )
+        return 1
+
+    from fa.api.auth import OPEN, mode_for
+    from fa.config import load_settings
+
+    settings = load_settings()
+    mode = mode_for(settings)
+    host = "0.0.0.0" if args.lan else args.host  # noqa: S104 - deliberate, guarded below
+    contained = _in_container()
+    # Inside a container the bind address says nothing about who can reach the
+    # server: the port mapping on the host decides that, and this process
+    # cannot see it. Outside, the bind address is exactly the exposure.
+    exposed = host not in {"127.0.0.1", "localhost", "::1"} and not contained
+
+    if exposed and mode == OPEN and not args.insecure:
+        print(
+            "🚫 Sin autenticación no se puede salir de esta máquina.\n"
+            "   Cualquiera en la red vería la cartera y podría cargar movimientos.\n\n"
+            "   Elegí una:\n"
+            f"     1) Token compartido — agregá al .env:  FA_API_TOKEN={secrets.token_urlsafe(24)}\n"
+            "     2) Supabase — configurá SUPABASE_URL y SUPABASE_JWT_SECRET\n"
+            "     3) Red de confianza y bajo tu responsabilidad:  --lan --insecure"
+        )
+        return 2
+
+    if exposed and mode == OPEN:
+        print("⚠️  Escuchando en toda la red SIN autenticación (--insecure).")
+    elif contained and mode == OPEN:
+        print(
+            "⚠️  Sin autenticación: quién llega depende de cómo compose publique el\n"
+            "   puerto. Con 127.0.0.1:8000 sólo esta máquina; si lo abrís a la red,\n"
+            "   poné FA_API_TOKEN en el .env primero."
+        )
+
+    if contained:
+        # The container's own address is meaningless outside it.
+        print(f"📊 Dashboard en http://localhost:{args.port} (según el mapeo de compose)")
+    else:
+        where = _lan_address() if exposed else host
+        print(f"📊 Dashboard en http://{where}:{args.port}")
+        if exposed:
+            print(f"   Abrilo desde el celular en esa misma URL. Modo de acceso: {mode}.")
+    print(f"   Acceso: {mode}. Ctrl+C para cortar.")
+    uvicorn.run("fa.api.app:app", host=host, port=args.port, reload=args.reload)
+    return 0
+
+
 def _cmd_check(app: App, args: argparse.Namespace) -> int:
-    report = actions.check_alerts(app, args.ticker.upper() if args.ticker else None)
+    report = actions.check_alerts(
+        app,
+        args.ticker.upper() if args.ticker else None,
+        trigger=getattr(args, "trigger", "manual"),
+    )
     if args.json:
         print(
             json.dumps(
                 {
+                    "run_id": report.run_id,
                     "checked": report.checked,
                     "fired": [
                         {"ticker": s.alert.ticker, "kind": s.alert.kind, "title": s.title, "message": s.message}
@@ -248,7 +370,9 @@ def _cmd_kinds(args: argparse.Namespace) -> int:
 
 
 def _cmd_suggestions(app: App, args: argparse.Namespace) -> int:
-    from fa.store import suggestions as suggestions_store  # noqa: PLC0415 - keeps startup light
+    from fa.store import (
+        suggestions as suggestions_store,  # noqa: PLC0415 - keeps startup light
+    )
 
     ticker = args.ticker.upper() if args.ticker else None
     items = suggestions_store.list_suggestions(app.conn, ticker=ticker, status=args.status)
@@ -294,6 +418,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "kinds":  # does not need providers or the database
         return _cmd_kinds(args)
+    if args.command == "serve":
+        # The server opens its own database when it starts, and it must not
+        # inherit a connection that this process would close on the way out.
+        return _cmd_serve(args)
 
     # JSON output must stay machine readable, so the console channel keeps quiet.
     echo = not (getattr(args, "quiet", False) or getattr(args, "json", False))

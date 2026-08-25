@@ -12,7 +12,7 @@ from fa.store import positions as positions_store
 from fa.store import suggestions as suggestions_store
 from fa.ui import ticker_menu
 from fa.ui.charts import clear_screen
-from fa.ui.prompts import ask, ask_int, ask_ticker, ask_yes_no
+from fa.ui.prompts import ask, ask_date, ask_float, ask_int, ask_ticker, ask_yes_no
 from fa.ui.suggestions_ui import review
 from fa.ui.views import (
     SEPARATOR,
@@ -136,12 +136,36 @@ def _manage_positions(app: App) -> None:
         return
     position_id = ask_int("ID")
     if action.startswith("c"):
-        ok = positions_store.close_position(app.conn, position_id)
+        closed = _close_with_sale(app, position_id)
+        ok = closed is not None
+        if closed is not None and closed.realized_pnl is not None:
+            print(f"   P&L realizado: {closed.realized_pnl:+.2f} {closed.currency}")
     elif action.startswith("b"):
         ok = positions_store.delete_position(app.conn, position_id)
     else:
         return
     print("✅ Listo." if ok else "⚠️  No encontrada.")
+
+
+def _close_with_sale(app: App, position_id: int):
+    """Ask for the sale so the ledger records a real exit, not just a flag.
+
+    Leaving the price empty archives the position without inventing a number:
+    the realised P&L stays unknown instead of wrong.
+    """
+    raw = ask("Precio de venta (ENTER para cerrar sin precio)", "")
+    if not raw:
+        return positions_store.close_position(app.conn, position_id)
+    try:
+        price = float(raw)
+    except ValueError:
+        print("⚠️  Precio inválido, cierro sin registrar la venta.")
+        return positions_store.close_position(app.conn, position_id)
+    sold_on = ask_date("Fecha de venta")
+    fees = ask_float("Comisiones", 0.0)
+    return positions_store.close_position(
+        app.conn, position_id, price=price, close_date=sold_on, fees=fees
+    )
 
 
 def _manage_alerts(app: App) -> None:

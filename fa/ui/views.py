@@ -1,13 +1,13 @@
 """Rendering helpers shared by the CLI and the interactive menu."""
 from __future__ import annotations
 
-import sqlite3
 from typing import Mapping, Sequence
 
 from fa.alerts.engine import CheckReport
 from fa.models import Alert, Position, Suggestion
 from fa.portfolio import Portfolio
 from fa.store import positions as positions_store
+from fa.store.database import Database
 
 SEPARATOR = "=" * 70
 
@@ -46,7 +46,7 @@ def render_portfolio(portfolio: Portfolio) -> None:
     )
 
 
-def render_alerts(conn: sqlite3.Connection, alerts: Sequence[Alert]) -> None:
+def render_alerts(conn: Database, alerts: Sequence[Alert]) -> None:
     if not alerts:
         print("\n(No hay alertas configuradas)")
         return
@@ -82,9 +82,11 @@ def render_check_report(report: CheckReport) -> None:
         print("✅ Nada que reportar.")
 
 
-def portfolio_summary_for_ai(conn: sqlite3.Connection, ticker: str) -> str:
+def portfolio_summary_for_ai(conn: Database, ticker: str) -> str:
     """Compact text description of the user's exposure, fed to the AI prompt."""
-    from fa.store import alerts as alerts_store  # noqa: PLC0415 - avoids a circular import
+    from fa.store import (
+        alerts as alerts_store,  # noqa: PLC0415 - avoids a circular import
+    )
 
     positions = positions_store.positions_for_ticker(conn, ticker)
     alerts = alerts_store.list_alerts(conn, ticker=ticker, only_active=True)

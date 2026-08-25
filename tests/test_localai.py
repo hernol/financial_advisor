@@ -7,7 +7,12 @@ import urllib.error
 
 import pytest
 
-from fa.local_tasks import catalogue_hint, extract_claims, portfolio_digest, repair_suggestions
+from fa.local_tasks import (
+    catalogue_hint,
+    extract_claims,
+    portfolio_digest,
+    repair_suggestions,
+)
 from fa.localai import LocalAIClient, LocalAIError
 from tests.conftest import make_settings
 

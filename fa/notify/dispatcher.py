@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Sequence
 
 from fa.config import Settings
@@ -11,6 +12,15 @@ from fa.notify.desktop import DesktopChannel
 from fa.notify.telegram import TelegramChannel
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DeliveryResult:
+    """What happened on one channel for one signal."""
+
+    channel: str
+    ok: bool
+    error: str = ""
 
 
 class Dispatcher:
@@ -23,16 +33,29 @@ class Dispatcher:
     def names(self) -> tuple[str, ...]:
         return tuple(c.name for c in self._channels)
 
-    def send(self, signal: Signal) -> list[str]:
-        """Return the names of the channels that accepted the message."""
-        delivered: list[str] = []
+    def dispatch(self, signal: Signal) -> list[DeliveryResult]:
+        """Try every channel and report each outcome, failures included.
+
+        A channel that refuses or crashes used to leave no trace at all: the
+        event simply recorded a shorter ``delivered`` list. Push notifications
+        need the difference between "not configured" and "Telegram returned
+        429", so both are returned here and persisted by the caller.
+        """
+        results: list[DeliveryResult] = []
         for channel in self._channels:
             try:
-                if channel.send(signal):
-                    delivered.append(channel.name)
-            except Exception:  # noqa: BLE001 - a broken channel must not stop the others
+                ok = bool(channel.send(signal))
+                results.append(
+                    DeliveryResult(channel.name, ok, "" if ok else "el canal rechazó el envío")
+                )
+            except Exception as exc:  # noqa: BLE001 - a broken channel must not stop the others
                 logger.exception("channel %s crashed", channel.name)
-        return delivered
+                results.append(DeliveryResult(channel.name, False, f"{type(exc).__name__}: {exc}"))
+        return results
+
+    def send(self, signal: Signal) -> list[str]:
+        """Return the names of the channels that accepted the message."""
+        return [result.channel for result in self.dispatch(signal) if result.ok]
 
 
 def build_dispatcher(settings: Settings, *, echo: bool = True) -> Dispatcher:
@@ -44,3 +67,15 @@ def build_dispatcher(settings: Settings, *, echo: bool = True) -> Dispatcher:
             DesktopChannel(settings.desktop_notifications),
         ]
     )
+
+
+def deliver(dispatcher: object, signal: Signal) -> tuple[DeliveryResult, ...]:
+    """Per-channel outcome from any dispatcher.
+
+    Test doubles only implement ``send``; for them a returned name means success
+    and nothing is known about the channels that stayed silent.
+    """
+    detailed = getattr(dispatcher, "dispatch", None)
+    if callable(detailed):
+        return tuple(detailed(signal))
+    return tuple(DeliveryResult(name, True) for name in dispatcher.send(signal))

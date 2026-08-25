@@ -15,6 +15,8 @@ data/*
 *.db-wal
 *.sqlite
 *.sqlite3
+# Respaldos que deja el motor de migraciones antes de cambiar el esquema.
+*.bak
 alerts.log
 *.log
 
@@ -53,3 +55,7 @@ Thumbs.db
 # Local, machine-specific permissions; the shared .claude/settings.json (if it
 # is ever added) stays tracked.
 .claude/settings.local.json
+
+# --- Playwright MCP --------------------------------------------------------
+# Capturas y snapshots que deja el navegador durante la verificación.
+.playwright-mcp/

@@ -21,6 +21,13 @@ DEFAULT_LOCAL_AI_MAX_TOKENS = 2000
 # Index the positions are measured against for relative strength.
 DEFAULT_BENCHMARK = "SPY"
 
+# The application values everything in one currency. Mixing them without a
+# conversion table produces a total that is quietly wrong, which is worse than
+# refusing the position, so anything else is excluded and reported rather than
+# summed. Changing this is not a matter of editing the constant: it needs an FX
+# table and a decision about which rate applies to a historical trade.
+BASE_CURRENCY = "USD"
+
 
 def _flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
@@ -60,6 +67,20 @@ class Settings:
     benchmark: str
     db_path: Path
     log_path: Path
+    database_url: str = ""
+    api_token: str = ""
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""
+
+    @property
+    def database_target(self) -> "Path | str":
+        """Where the data lives: a Postgres URL when set, the SQLite file if not.
+
+        This single choice is what separates a laptop install from a hosted one.
+        Nothing else in the application asks which engine it is talking to.
+        """
+        return self.database_url or self.db_path
 
     @property
     def local_ai_enabled(self) -> bool:
@@ -79,6 +100,8 @@ def load_settings() -> Settings:
     """Build settings from the environment."""
     db_path = Path(os.environ.get("FA_DB_PATH", DB_PATH))
     log_path = Path(os.environ.get("FA_LOG_PATH", LOG_PATH))
+    database_url = os.environ.get("DATABASE_URL", "").strip()
+    api_token = os.environ.get("FA_API_TOKEN", "").strip()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     return Settings(
@@ -99,4 +122,9 @@ def load_settings() -> Settings:
         benchmark=os.environ.get("FA_BENCHMARK", DEFAULT_BENCHMARK).upper(),
         db_path=db_path,
         log_path=log_path,
+        database_url=database_url,
+        api_token=api_token,
+        supabase_url=os.environ.get("SUPABASE_URL", "").strip().rstrip("/"),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", "").strip(),
+        supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", "").strip(),
     )

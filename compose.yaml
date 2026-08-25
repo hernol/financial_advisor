@@ -29,14 +29,44 @@ services:
       - .:/app
       - ./data:/app/data
 
-  # One-shot alert check, meant to be driven by cron on the host:
-  #   */30 9-17 * * 1-5  docker compose run --rm alerts
+  # The dashboard: API plus the web app on one port.
+  #   docker compose up -d dashboard   →   http://localhost:8000
+  #
+  # Published on 127.0.0.1 on purpose, so it is private by default. To reach it
+  # from the phone, put FA_API_TOKEN in the .env and change the mapping to
+  # "8000:8000" — the port mapping is what decides who can get in, not the
+  # address the process binds inside the container.
+  dashboard:
+    build: .
+    image: financial_analyzer:latest
+    container_name: financial_analyzer_web
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - FA_API_TOKEN=${FA_API_TOKEN:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
+    volumes:
+      - ./data:/app/data
+      # The client is static files; mounting it means an edit shows up on
+      # reload instead of needing an image rebuild.
+      - ./web:/app/web
+
+  # One-shot alert check, driven by the systemd timer on the host (see
+  # scripts/setup-systemd.sh). --trigger labels the row it writes to
+  # check_runs, so a scheduled run is distinguishable from a manual one.
   alerts:
     build: .
     image: financial_analyzer:latest
     profiles: ["cron"]
     user: "${UID:-1000}:${GID:-1000}"
-    command: ["check-alerts"]
+    command: ["check-alerts", "--trigger", "timer"]
     environment:
       - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
@@ -47,3 +77,21 @@ services:
       - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
     volumes:
       - ./data:/app/data
+
+  # Postgres for running the suite against the engine the hosted mode uses.
+  # Ephemeral on purpose: no volume, so every start is a clean database.
+  #   docker compose --profile dev up -d postgres
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["dev"]
+    environment:
+      - POSTGRES_USER=fa
+      - POSTGRES_PASSWORD=fa
+      - POSTGRES_DB=fa_test
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fa -d fa_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20

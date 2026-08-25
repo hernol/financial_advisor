@@ -199,7 +199,7 @@ DIRECTIONS = ("any", "above", "below")
 def get_kind(key: str) -> AlertKind:
     kind = CATALOGUE.get(key)
     if kind is None:
-        raise ValidationError(f"Unknown alert kind '{key}'. Valid: {', '.join(sorted(CATALOGUE))}")
+        raise ValidationError(f"No existe la alerta '{key}'. Válidas: {', '.join(sorted(CATALOGUE))}.")
     return kind
 
 
@@ -209,27 +209,27 @@ def normalize_params(key: str, params: Mapping[str, Any] | None) -> dict[str, An
     merged: dict[str, Any] = {**kind.defaults, **(params or {})}
     for field_name in kind.required:
         if merged.get(field_name) in (None, ""):
-            raise ValidationError(f"Alert '{key}' requires parameter '{field_name}'")
+            raise ValidationError(f"La alerta '{key}' necesita el parámetro '{field_name}'.")
     for name, value in list(merged.items()):
         if name in NUMERIC_FIELDS and value is not None:
             try:
                 merged[name] = int(value) if name in INTEGER_FIELDS else float(value)
             except (TypeError, ValueError) as exc:
-                raise ValidationError(f"Parameter '{name}' of alert '{key}' must be numeric") from exc
+                raise ValidationError(f"El parámetro '{name}' de '{key}' tiene que ser un número.") from exc
             if merged[name] < 0:
-                raise ValidationError(f"Parameter '{name}' of alert '{key}' must be positive")
+                raise ValidationError(f"El parámetro '{name}' de '{key}' no puede ser negativo.")
     if key == SMA_CROSS and merged["fast"] >= merged["slow"]:
-        raise ValidationError("sma_cross requires fast < slow")
+        raise ValidationError("En sma_cross la media rápida tiene que ser menor que la lenta.")
     if key in {PCT_UP, PCT_DOWN} and merged.get("reference") not in {"buy", "baseline"}:
-        raise ValidationError("reference must be 'buy' or 'baseline'")
+        raise ValidationError("La referencia tiene que ser 'buy' (precio de compra) o 'baseline' (precio de hoy).")
     if key == PERIOD_ELAPSED and not (merged.get("months") or merged.get("days")):
-        raise ValidationError("period_elapsed requires 'months' or 'days'")
+        raise ValidationError("period_elapsed necesita 'months' o 'days'.")
     if key == MACD_CROSS and merged["fast"] >= merged["slow"]:
-        raise ValidationError("macd_cross requires fast < slow")
+        raise ValidationError("En macd_cross la media rápida tiene que ser menor que la lenta.")
     if key == REL_STRENGTH and merged.get("window") not in WINDOWS:
-        raise ValidationError(f"window must be one of {', '.join(WINDOWS)}")
+        raise ValidationError(f"La ventana tiene que ser una de: {', '.join(WINDOWS)}.")
     if key == SMA_BREAK and merged.get("direction") not in {"above", "below"}:
-        raise ValidationError("sma_break requires direction 'above' or 'below'")
+        raise ValidationError("sma_break necesita dirección 'above' (hacia arriba) o 'below' (hacia abajo).")
     if key == MACD_CROSS and merged.get("direction") not in DIRECTIONS:
-        raise ValidationError(f"direction must be one of {', '.join(DIRECTIONS)}")
+        raise ValidationError(f"La dirección tiene que ser una de: {', '.join(DIRECTIONS)}.")
     return merged

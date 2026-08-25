@@ -44,6 +44,62 @@ Para que el contenedor llegue a tu `llama-server` del host, la URL por defecto a
 Dentro de Docker poné `FA_DESKTOP_NOTIFICATIONS=false` (ya viene así en el compose):
 `notify-send` no tiene DBUS ahí.
 
+### Opción C — Postgres o Supabase
+
+Por defecto la base es un archivo SQLite en `./data` y no hace falta configurar nada. Si
+preferís Postgres — porque lo vas a hostear, o porque querés varias cuentas — alcanza con
+definir `DATABASE_URL`:
+
+```bash
+# en el .env
+DATABASE_URL=postgresql://usuario:clave@host:5432/basededatos
+```
+
+Con esa variable presente se usa Postgres; sin ella, SQLite. No hay nada más que cambiar:
+el esquema se crea solo la primera vez, igual que con SQLite.
+
+Necesitás el driver, que no viene por defecto para que el modo local no cargue con él:
+
+```bash
+pip install "psycopg[binary]"
+```
+
+Con **Supabase**, la URL sale de *Project Settings → Database → Connection string*. Usá la
+del **pooler en modo transacción** (puerto 6543), no la conexión directa: el chequeo
+periódico y la app abren conexiones cortas y seguidas, y la directa se queda sin cupo.
+
+Un detalle que conviene saber: en Postgres los payloads se guardan como `JSONB` nativo, así
+que se pueden consultar desde SQL sin parsear:
+
+```sql
+SELECT ticker, rsi, payload->>'trend' FROM indicator_snapshots ORDER BY taken_at DESC;
+```
+
+### Migraciones y respaldo
+
+El esquema tiene versión y se actualiza solo al abrir la base. Antes del primer cambio de
+una actualización, en SQLite se deja un respaldo al lado del archivo:
+
+```
+data/financial_analyzer.db.pre-v10.bak
+```
+
+Si venís de una versión anterior no tenés que hacer nada: la primera corrida migra y avisa
+en el log. Los datos existentes se conservan; ninguna migración borra nada.
+
+### Correr los tests contra los dos motores
+
+La suite corre contra SQLite por defecto. Para probar también Postgres:
+
+```bash
+docker compose --profile dev up -d postgres
+FA_TEST_DATABASE_URL=postgresql://fa:fa@localhost:55432/fa_test pytest
+docker compose --profile dev down          # cuando termines
+```
+
+El Postgres de dev es efímero a propósito (sin volumen): cada arranque es una base limpia.
+Cada test usa su propio esquema, así que quedan tan aislados como con un archivo temporal.
+
 ### Modelo local (opcional)
 
 Levantá tu servidor OpenAI-compatible (LM Studio → Developer → Start Server, o
@@ -328,7 +384,136 @@ Al abrir el menú interactivo te muestra primero las alertas que todavía no mar
 
 ---
 
-## 6. Análisis
+## 6. Dashboard web
+
+Un servidor con la API y la app móvil en el mismo puerto. Lee **sólo lo que ya está
+guardado**: no sale a pedir precios, así que abrir la pantalla no dispara ninguna descarga
+y funciona aunque yfinance esté caído.
+
+```bash
+pip install "fastapi>=0.115" "uvicorn[standard]>=0.32"
+python financial_analyzer.py serve
+# → http://127.0.0.1:8000
+```
+
+Con Docker hay un servicio dedicado:
+
+```bash
+docker compose up -d dashboard      # → http://localhost:8000
+docker compose logs -f dashboard    # para ver qué hizo al arrancar
+docker compose down dashboard       # para bajarlo
+```
+
+Queda levantado solo (`restart: unless-stopped`), así que sobrevive a un reinicio.
+
+**El puerto se publica en `127.0.0.1:8000` a propósito**: adentro del contenedor el proceso
+escucha en `0.0.0.0` porque es la única forma de ser alcanzable, pero quién llega de verdad
+lo decide el mapeo del compose. Para abrirlo a la red, poné `FA_API_TOKEN` en el `.env` y
+cambiá el mapeo a `"8000:8000"`.
+
+El servicio monta `./web`, así que un cambio en el cliente se ve recargando la página, sin
+rebuild de la imagen.
+
+Por defecto escucha sólo en `127.0.0.1`, así que no sale de la máquina.
+
+### Verla desde el celular en la red local
+
+```bash
+# 1. poné un token en el .env
+FA_API_TOKEN=pegá-acá-una-cadena-larga-y-random
+
+# 2. levantá para toda la red
+python financial_analyzer.py serve --lan
+# 📊 Dashboard en http://192.168.0.14:8000
+```
+
+Abrí esa URL en el celular, pegá el token una vez y queda guardado. `--lan` **se niega a
+arrancar sin autenticación**: sin token, cualquiera en la red vería la cartera y podría
+cargar movimientos. Si la red es de confianza y querés saltearlo igual, existe
+`--lan --insecure`, pero es tu responsabilidad.
+
+Para llegar desde afuera de tu casa, una VPN tipo Tailscale sigue siendo mejor que abrir
+el puerto en el router.
+
+### Modos de acceso
+
+El servidor elige el modo solo, según lo que haya configurado:
+
+| Configuración | Modo | Para qué |
+|---|---|---|
+| nada | `open` | Uso local, sólo loopback |
+| `FA_API_TOKEN` | `token` | Tu red: una cuenta, un secreto compartido |
+| `SUPABASE_URL` + `SUPABASE_JWT_SECRET` | `supabase` | Varios usuarios, cada uno con su cuenta |
+
+Con Supabase, los valores salen de *Project Settings → API* (la URL y la clave `anon`) y de
+*Project Settings → API → JWT Settings* (el secreto). Necesitás además el paquete `pyjwt`.
+La app muestra un login con email y contraseña, y **cada usuario nuevo estrena su propia
+cuenta la primera vez que entra**: sus posiciones, alertas e historial no se cruzan con los
+de nadie.
+
+```bash
+pip install pyjwt
+```
+
+### Instalarla en el celular
+
+Es una PWA: se instala sin tienda. Abrí la URL en el navegador del teléfono y usá
+*Agregar a pantalla de inicio* (Chrome: menú ⋮ → Instalar app; Safari: Compartir →
+Agregar a inicio). Queda como una app más, a pantalla completa.
+
+### Qué muestra
+
+Dos secciones en la barra inferior.
+
+**Cartera** — el valor total con su P&L, la curva de equity, cada tenencia con su peso en
+la cartera y el libro mayor de movimientos. Las tenencias salen del ledger, así que el
+costo es el promedio real de todas tus compras y el P&L realizado incluye lo que ya
+vendiste.
+
+**Tickers** — la pantalla de un papel, con tres pestañas:
+
+| Pestaña | Contenido |
+|---|---|
+| **Precio** | Cierres con SMA50 y SMA200, ventanas de 1M a 5A, y la grilla de indicadores |
+| **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
+| **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
+
+Los precios son **el último cierre guardado**, no una cotización en vivo: la pantalla no
+sale a pedir datos. Si una posición no tiene velas guardadas, la app avisa que quedó
+afuera del total en vez de valuarla en cero.
+
+**Todo se valúa en USD.** Si un papel cotiza en otra moneda —Yahoo devuelve la moneda real
+del listado— queda fuera del total y la app dice cuál y por qué. Sumarlo sin tabla de
+cotizaciones daría un número que parece correcto y no lo es. Cargar una operación en otra
+moneda también se rechaza, con el mismo motivo.
+
+### Cargar cosas desde el teléfono
+
+Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**
+(compra, venta, dividendo, split, comisión) y **marcar avisos como vistos**.
+
+El formulario de alerta se arma solo a partir del catálogo: los 18 tipos con sus valores
+por defecto y sus opciones salen de `fa/alerts/kinds.py`, así que un tipo nuevo aparece en
+la app sin tocar el cliente. La validación es exactamente la misma que usa la terminal —
+si un parámetro no sirve en el CLI, tampoco sirve acá, y el mensaje de error es el mismo.
+
+Dos cosas a tener en cuenta:
+
+- Una alerta de porcentaje con referencia *precio de hoy* se ancla al **último cierre
+  guardado**, no a una cotización en vivo. Si el ticker todavía no tiene velas, la app te
+  lo dice en vez de anclar a un número inventado.
+- **Borrar es lógico**: la alerta deja de correr, pero todo lo que disparó se conserva.
+  Lo mismo con los movimientos.
+
+El indicador del encabezado dice hace cuánto corrió el último chequeo. Si dice `sin
+corridas` o se pone amarillo, los números que estás viendo son viejos: eso es más
+importante que los números mismos.
+
+La pestaña *Indicador* y la curva de equity arrancan vacías en una instalación nueva.
+Cada corrida de `check-alerts` agrega un punto a las dos; después de unos días hay serie
+para mirar.
+
+## 7. Análisis
 
 ```bash
 # Métricas anuales y trimestrales reales (balance, FCF, EV, yields)
@@ -421,7 +606,7 @@ número, y lo que no pudimos traer va en una sección **MISSING DATA** con la or
 Si ves `faltantes: N` alto, el reporte se hizo con huecos: fijate la sección "Verificación de
 datos" del informe, que dice explícitamente con qué se quedó corto.
 
-## 7. Sugerencias de la IA
+## 8. Sugerencias de la IA
 
 El reporte devuelve, además del texto, un bloque estructurado con **alertas y acciones
 sugeridas**. Quedan guardadas como pendientes y se aplican de a una:
@@ -450,7 +635,7 @@ earnings") se listan igual pero no se convierten en alerta: quedan como recordat
 modelo propone un tipo de alerta que no existe, o con parámetros inválidos, se degrada a acción
 en vez de perderse.
 
-## 8. Digest del portfolio (modelo local)
+## 9. Digest del portfolio (modelo local)
 
 ```bash
 .venv/bin/python financial_analyzer.py digest              # resumen redactado
@@ -467,7 +652,7 @@ crudos y sale con código 2. Cron-eable para tener el resumen cada mañana:
 
 ---
 
-## 9. Menú interactivo
+## 10. Menú interactivo
 
 ```bash
 .venv/bin/python financial_analyzer.py
@@ -486,7 +671,7 @@ La opción 1 abre el workspace por ticker descripto en la sección 3.
 
 ---
 
-## 10. Casos puntuales
+## 11. Casos puntuales
 
 **Hubo un split y tu costo quedó mal** → menú opción 11, o mirá lo que sugirió la alerta
 `split_detected`. Ratio `4` = 4-for-1: divide el precio de compra por 4 y multiplica la cantidad
@@ -509,7 +694,7 @@ sqlite3 data/financial_analyzer.db "SELECT ticker, kind, params, last_fired_at F
 
 ---
 
-## 11. Si algo falla
+## 12. Si algo falla
 
 | Síntoma | Causa / arreglo |
 |---|---|
