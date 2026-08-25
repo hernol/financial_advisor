@@ -149,6 +149,8 @@
               aria-controls="tab-indicator" id="tabbtn-indicator">Indicador</button>
       <button class="tab" data-tab="alerts" role="tab" aria-selected="false"
               aria-controls="tab-alerts" id="tabbtn-alerts">Alertas</button>
+      <button class="tab" data-tab="fundamentals" role="tab" aria-selected="false"
+              aria-controls="tab-fundamentals" id="tabbtn-fundamentals">Números</button>
       <button class="tab" data-tab="ai" role="tab" aria-selected="false"
               aria-controls="tab-ai" id="tabbtn-ai">IA</button>
     </div>
@@ -184,6 +186,17 @@
         </button>
       </div>
       <ul id="event-list" class="cards"></ul>
+    </div>
+
+    <div id="tab-fundamentals" class="panel" role="tabpanel"
+         aria-labelledby="tabbtn-fundamentals" hidden>
+      <div class="ranges" id="period-pick" role="group" aria-label="Período"></div>
+      <p id="fund-note" class="note"></p>
+      <div id="fund-warn" class="notice warn" hidden></div>
+      <h2 class="section-h">Resumen</h2>
+      <div class="scroll"><table id="fund-summary" class="grid"></table></div>
+      <h2 class="section-h">Calidad del negocio</h2>
+      <div class="scroll"><table id="fund-quality" class="grid"></table></div>
     </div>
 
     <div id="tab-ai" class="panel" role="tabpanel" aria-labelledby="tabbtn-ai" hidden>

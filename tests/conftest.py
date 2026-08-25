@@ -63,6 +63,10 @@ def no_network_market():
             self.calls.append(ticker)
             raise DataUnavailableError(f"sin red en los tests ({ticker})")
 
+        def analysis_tables(self, ticker, **kwargs):
+            self.calls.append(ticker)
+            raise DataUnavailableError(f"sin red en los tests ({ticker})")
+
     deps.set_market_factory(RefusingMarket)
     yield
     deps.set_market_factory(None)

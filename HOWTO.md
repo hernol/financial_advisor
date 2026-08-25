@@ -521,6 +521,7 @@ vendiste.
 | **Precio** | Cierres con SMA50 y SMA200, ventanas de 1M a 5A, y la grilla de indicadores |
 | **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
 | **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
+| **Números** | Los estados contables: resumen (ingresos, FCF, deuda neta, yields) y calidad del negocio (márgenes, crecimiento, cobertura, ROE), anual y trimestral |
 | **IA** | Pedir el informe estratégico, leerlo, y convertir sus sugerencias en alertas |
 
 Los precios son **el último cierre guardado**, no una cotización en vivo: **ninguna pantalla
@@ -545,6 +546,15 @@ guardado: los informes viejos se leen sin volver a pedirlos.
 Las **sugerencias** que propone se aceptan con un botón y se vuelven alertas de verdad. Las
 que no son automatizables —"tomar ganancias parciales", "mirar el balance del 10/09"— se
 muestran distinto y lo dicen: son una acción tuya, no una regla que el sistema pueda vigilar.
+
+La pestaña **Números** son las mismas tablas que muestran `analyze --period annual` y
+`--period quarterly`, con los períodos en columnas: la comparación que uno hace es una línea
+a lo largo del tiempo, y eso se lee mejor como fila. Se guardan al traerlas, así que abrir la
+pantalla no descarga nada; se refrescan solas cuando pasan más de siete días, que es el ritmo
+al que se mueve un balance.
+
+Si la deuda neta de algún período es estimada —porque el proveedor no reportó deuda total y
+caja— la pantalla lo dice arriba: esa estimación se propaga al EV y a su yield.
 
 En la pestaña *Alertas* hay además **Chequear ahora**, que evalúa las alertas de ese papel sin
 esperar al timer.

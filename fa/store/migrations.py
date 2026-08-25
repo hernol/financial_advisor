@@ -506,6 +506,26 @@ def _migrate_corrections(db: Database) -> None:
     )
 
 
+# --- v12: fundamentals ------------------------------------------------------
+# The metric tables were rebuilt from a fresh download every time and thrown
+# away, so the dashboard had nothing to show without fetching. Fundamentals
+# describe a company, not an account: one row per ticker and period kind, shared
+# by everybody, like the price bars.
+
+_FUNDAMENTALS = """
+CREATE TABLE IF NOT EXISTS fundamental_snapshots (
+    ticker      TEXT NOT NULL,
+    period_kind TEXT NOT NULL,
+    rows        {JSON} NOT NULL DEFAULT '[]',
+    source      TEXT NOT NULL DEFAULT '',
+    shares      {REAL},
+    price       {REAL},
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (ticker, period_kind)
+);
+"""
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "transaction ledger", _migrate_ledger, sqlite_only=True),
     Migration(4, "drop destructive cascades", _migrate_no_cascade, sqlite_only=True),
@@ -516,6 +536,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(9, "backfill the ledger from existing positions", _migrate_backfill, sqlite_only=True),
     Migration(10, "accounts and the account_id column", _migrate_tenancy),
     Migration(11, "corrections point at what they replace", _migrate_corrections),
+    Migration(12, "store the fundamental tables", _script(_FUNDAMENTALS)),
 )
 
 TARGET_VERSION = max(m.version for m in MIGRATIONS)

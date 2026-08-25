@@ -123,8 +123,8 @@ python financial_analyzer.py serve --lan    # toda la red, exige FA_API_TOKEN
 ```
 
 Es una **PWA**: se instala desde el navegador del celular, sin tienda. Dos secciones —
-Cartera y Tickers — con gráficos de precio, historial de indicadores, alta y baja de alertas
-y carga de operaciones.
+Cartera y Tickers — con gráficos de precio, historial de indicadores, estados contables,
+informe de IA con sus sugerencias, alta y baja de alertas y carga de operaciones.
 
 Lee **sólo lo que ya está guardado**: abrir una pantalla no dispara ninguna descarga, así que
 funciona con el proveedor caído y no cuesta una llamada por visita. Cargar un ticker nuevo sí

@@ -285,3 +285,43 @@ def test_the_asset_version_follows_the_files(monkeypatch, tmp_path):
     (tmp_path / "styles.css").write_text("a{color:red}")
     assert api_app.asset_version() != first
     monkeypatch.setattr(api_app, "WEB_ROOT", original)
+
+
+def test_the_day_change_ignores_the_session_in_progress(client, conn):
+    """Before the open the provider's bar for today just repeats yesterday's
+    close; comparing against it reports every ticker flat every morning."""
+    from datetime import date as real_date
+
+    today = real_date.today()
+    history_store.save_bars(
+        conn, "PODD",
+        [
+            PricePoint(day=today - timedelta(days=2), close=100.0),
+            PricePoint(day=today - timedelta(days=1), close=120.0),
+            PricePoint(day=today, close=120.0),          # partial, carried over
+        ],
+        "test",
+    )
+    seed_alert(conn)
+    run_checks(conn, FakeMarket(price=132.0, history=make_history([100.0, 120.0])),
+               RecordingDispatcher(), now=NOW)
+    body = client.get("/api/tickers/PODD").json()
+    # 132 against yesterday's 120, not against today's placeholder.
+    assert body["change_abs"] == pytest.approx(12.0)
+    assert body["change_pct"] == pytest.approx(10.0)
+
+
+def test_a_ticker_with_only_a_partial_bar_has_no_day_change(conn):
+    """Nothing completed to compare against, so the move is unknown, not zero.
+
+    Straight at the helper: driving this through a run would have the fake
+    market archive older bars and quietly give the comparison what it needs.
+    """
+    from datetime import date as real_date
+
+    from fa.api.tickers import _session_change
+
+    history_store.save_bars(
+        conn, "PODD", [PricePoint(day=real_date.today(), close=120.0)], "test"
+    )
+    assert _session_change(conn, "PODD", 132.0) == (None, None)

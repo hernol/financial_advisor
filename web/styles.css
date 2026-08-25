@@ -877,3 +877,47 @@ select:hover { border-color: var(--border); }
   background: var(--border-soft);
   margin: var(--s4) 0;
 }
+
+/* --- fundamentals table --------------------------------------------------- */
+/* Periods across, metrics down: the comparison people actually make is one
+   line through time, and that reads better as a row than as a column. */
+
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-bottom: var(--s3); }
+
+table.grid {
+  border-collapse: collapse;
+  font-family: var(--f-mono);
+  font-size: .8rem;
+  font-variant-numeric: tabular-nums;
+  min-width: 100%;
+}
+table.grid th, table.grid td { padding: .45rem .7rem; white-space: nowrap; text-align: right; }
+
+table.grid thead th {
+  font-size: .68rem;
+  letter-spacing: .05em;
+  color: var(--fg-dim);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+
+/* The metric name is the row header and has to stay put while the periods
+   scroll sideways. */
+table.grid th[scope="row"], table.grid thead th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  text-align: left;
+  background: var(--bg);
+  font-family: var(--f-sans);
+  font-size: .76rem;
+  color: var(--fg-muted);
+  font-weight: 400;
+  padding-left: 0;
+}
+table.grid tbody tr { border-bottom: 1px solid var(--border-soft); }
+table.grid tbody tr:last-child { border-bottom: none; }
+table.grid td { color: var(--fg); }
+table.grid td.na { color: var(--fg-dim); }
+table.grid td.up { color: var(--up); }
+table.grid td.down { color: var(--down); }

@@ -18,6 +18,7 @@ from fa.store import history as history_store
 from fa.store import positions as positions_store
 from fa.store import runs as runs_store
 from fa.store.database import Database
+from fa.warm import warm_fundamentals
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ def run_checks(
                 )
             continue
 
-        _remember(conn, context, run_id)
+        _remember(conn, context, run_id, market)
         price = context.quote.price
 
         for alert in ticker_alerts:
@@ -203,7 +204,7 @@ def run_checks(
     )
 
 
-def _remember(conn: Database, context, run_id: int | None) -> None:
+def _remember(conn: Database, context, run_id: int | None, market=None) -> None:
     """Persist the bars and indicators this run already paid to compute.
 
     Best effort on purpose: a failure to archive history must never stop an
@@ -216,3 +217,12 @@ def _remember(conn: Database, context, run_id: int | None) -> None:
         )
     except Exception:  # noqa: BLE001 - archiving must never break alerting
         logger.exception("could not archive history for %s", context.ticker)
+
+    if market is None:
+        return
+    try:
+        # Statements age out in a week, so this is a no-op on almost every run
+        # and a single extra fetch on the one after a quarterly filing.
+        warm_fundamentals(conn, market, context.ticker)
+    except Exception:  # noqa: BLE001 - same reason
+        logger.exception("could not refresh the fundamentals of %s", context.ticker)

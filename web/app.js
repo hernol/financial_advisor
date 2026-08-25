@@ -66,7 +66,8 @@ function showOk(message) {
 let signingIn = false;
 
 const state = {
-  view: 'portfolio', ticker: null, days: 252, series: 'rsi', charts: {}, kinds: null,
+  view: 'portfolio', ticker: null, days: 252, series: 'rsi',
+  period: 'annual', charts: {}, kinds: null,
 };
 
 const RANGES = [
@@ -1047,6 +1048,136 @@ function renderLedger(txs) {
 }
 
 
+
+// --- números del negocio -----------------------------------------------------
+
+// How each metric is written. Percentages carry their sign because the reader
+// cares which way it went; absolutes are in millions, as the tables build them.
+const METRIC = {
+  Period:            { label: 'Período', kind: 'text' },
+  Revenue:           { label: 'Ingresos', kind: 'millions' },
+  FCF:               { label: 'FCF', kind: 'millions', signed: true },
+  Net_Debt:          { label: 'Deuda neta', kind: 'millions', inverted: true },
+  FCF_Yield:         { label: 'FCF yield', kind: 'pct', signed: true },
+  EV_FCF_Yield:      { label: 'EV/FCF yield', kind: 'pct', signed: true },
+  Gross_Margin:      { label: 'Margen bruto', kind: 'pct' },
+  Operating_Margin:  { label: 'Margen operativo', kind: 'pct', signed: true },
+  Net_Margin:        { label: 'Margen neto', kind: 'pct', signed: true },
+  Revenue_Growth:    { label: 'Crecimiento', kind: 'pct', signed: true },
+  Interest_Coverage: { label: 'Cobertura intereses', kind: 'ratio' },
+  FCF_Conversion:    { label: 'Conversión a FCF', kind: 'pct' },
+  ROE:               { label: 'ROE', kind: 'pct', signed: true },
+  Net_Debt_to_FCF:   { label: 'Deuda neta / FCF', kind: 'ratio', inverted: true },
+};
+
+function metricCell(name, value) {
+  const spec = METRIC[name] || { label: name, kind: 'ratio' };
+  if (value == null) return { text: '—', cls: 'na' };
+  if (spec.kind === 'text') return { text: String(value), cls: '' };
+
+  let text;
+  if (spec.kind === 'pct') text = `${spec.signed ? signed(value, 1) : num(value, 1)}%`;
+  else if (spec.kind === 'millions') text = money(value);
+  else text = num(value, 2);
+
+  let cls = '';
+  if (spec.signed) cls = value >= 0 ? 'up' : 'down';
+  // Debt reads the other way round: less is better, so the colour follows the
+  // meaning rather than the sign.
+  if (spec.inverted && value > 0) cls = '';
+  return { text, cls };
+}
+
+function renderMetricTable(table, columns, rows) {
+  table.innerHTML = '';
+  if (!rows.length) {
+    table.innerHTML = '<tbody><tr><td class="na">Sin datos guardados.</td></tr></tbody>';
+    return;
+  }
+  const periods = rows.map((r) => r.Period);
+  const head = `<thead><tr><th>Métrica</th>${
+    periods.map((p) => `<th>${escapeHtml(p)}</th>`).join('')}</tr></thead>`;
+  const body = columns
+    .filter((name) => name !== 'Period')
+    .filter((name) => rows.some((r) => r[name] != null))
+    .map((name) => {
+      const spec = METRIC[name] || { label: name };
+      const cells = rows.map((r) => {
+        const { text, cls } = metricCell(name, r[name]);
+        return `<td class="${cls}">${escapeHtml(text)}</td>`;
+      }).join('');
+      return `<tr><th scope="row">${escapeHtml(spec.label)}</th>${cells}</tr>`;
+    }).join('');
+  table.innerHTML = `${head}<tbody>${body}</tbody>`;
+}
+
+function renderPeriodPicker(body) {
+  const box = $('period-pick');
+  box.innerHTML = '';
+  for (const [kind, label] of [['annual', 'Anual'], ['quarterly', 'Trimestral']]) {
+    const button = document.createElement('button');
+    button.className = 'range';
+    button.type = 'button';
+    button.textContent = label;
+    button.setAttribute('aria-pressed', String(kind === state.period));
+    button.addEventListener('click', () => {
+      state.period = kind;
+      paintFundamentals(body);
+    });
+    box.appendChild(button);
+  }
+}
+
+function paintFundamentals(body) {
+  renderPeriodPicker(body);
+  const period = body.periods[state.period] || { rows: [], stale: true };
+  renderMetricTable($('fund-summary'), body.summary_columns, period.rows);
+  renderMetricTable($('fund-quality'), body.quality_columns, period.rows);
+
+  const bits = [];
+  if (period.fetched_at) {
+    bits.push(`Fuente ${period.source || 'desconocida'} · traído ${ago(period.fetched_at)}`);
+  }
+  if (period.stale && period.rows.length) bits.push('Conviene actualizar.');
+  $('fund-note').textContent = bits.join(' · ');
+
+  const warn = $('fund-warn');
+  warn.hidden = !body.net_debt_estimated;
+  if (body.net_debt_estimated) {
+    warn.textContent = 'En algún período el proveedor no reportó deuda total y caja: '
+      + 'ahí la deuda neta es una estimación, y el EV y su yield la heredan.';
+  }
+}
+
+async function loadFundamentals() {
+  const body = await api(`/api/tickers/${state.ticker}/fundamentals`);
+  paintFundamentals(body);
+  if (body.missing) {
+    $('fund-note').textContent = 'Trayendo los estados contables…';
+    await send(`/api/tickers/${state.ticker}/fundamentals/refresh`, 'POST');
+    await awaitFundamentals();
+  }
+}
+
+/** Poll until the first fetch lands. */
+async function awaitFundamentals(attempts = 12) {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    let body;
+    try {
+      body = await api(`/api/tickers/${state.ticker}/fundamentals`);
+    } catch {
+      return;
+    }
+    if (!body.missing) {
+      paintFundamentals(body);
+      return;
+    }
+  }
+  $('fund-note').textContent =
+    'No se pudieron traer los estados contables. Revisá los proveedores.';
+}
+
 // --- informe de IA y sugerencias --------------------------------------------
 
 const PRIORITY_LABEL = { high: 'alta', medium: 'media', low: 'baja' };
@@ -1230,12 +1361,14 @@ function pickTab(name) {
   $('tab-chart').hidden = name !== 'chart';
   $('tab-indicator').hidden = name !== 'indicator';
   $('tab-alerts').hidden = name !== 'alerts';
+  $('tab-fundamentals').hidden = name !== 'fundamentals';
   $('tab-ai').hidden = name !== 'ai';
 
   if (name === 'indicator' && !state.charts.series) {
     loadSeries().catch((e) => showError(e.message));
   }
   if (name === 'ai') loadAI().catch((e) => showError(e.message));
+  if (name === 'fundamentals') loadFundamentals().catch((e) => showError(e.message));
   // uPlot se dimensiona al construirse; uno construido oculto mide cero.
   if (name === 'chart' && state.charts.price) state.charts.price.setSize(chartSize(240));
 }

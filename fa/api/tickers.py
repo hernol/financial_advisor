@@ -10,7 +10,7 @@ to show, which the response says plainly instead of filling in.
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -18,7 +18,9 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fa.api.auth import account_id
 from fa.api.deps import get_db
 from fa.indicators import sma_series
+from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
 from fa.store import alerts as alerts_store
+from fa.store import fundamentals as fundamentals_store
 from fa.store import history as history_store
 from fa.store import positions as positions_store
 from fa.store import runs as runs_store
@@ -130,10 +132,16 @@ def _session_change(db: Database, ticker: str, price: float | None) -> tuple[flo
     """
     if price is None:
         return (None, None)
-    recent = history_store.load_bars(db, ticker, limit=2)
-    if len(recent) < 2:
+    # Intraday the provider carries a bar for today, and before the open it is
+    # just yesterday's close repeated. Comparing against it reports a flat day
+    # for every ticker every morning, so the reference is the last *completed*
+    # session — the same reason completed_bars() exists for volume.
+    recent = history_store.load_bars(db, ticker, limit=4)
+    today = date.today()
+    completed = [bar for bar in recent if bar.day < today]
+    if not completed:
         return (None, None)
-    previous = recent[-2].close
+    previous = completed[-1].close
     if not previous:
         return (None, None)
     return (price - previous, (price - previous) / previous * 100.0)
@@ -269,6 +277,67 @@ def ticker_events(
         }
         for row in rows
     ]
+
+
+# The columns the screen shows, split the way the terminal splits them: the
+# headline numbers, then the ones that say whether the business is any good.
+SUMMARY_FIELDS = list(SUMMARY_COLUMNS)
+QUALITY_FIELDS = list(QUALITY_COLUMNS)
+
+
+@router.get("/tickers/{ticker}/fundamentals")
+def ticker_fundamentals(
+    ticker: str,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """The annual and quarterly metric tables, as last stored.
+
+    A read, so it never fetches. When there is nothing yet the response says so
+    and the client asks for a refresh, which is a write and may.
+    """
+    symbol = ticker.upper()
+    stored = fundamentals_store.load_all(db, symbol)
+    periods = {
+        kind: {
+            "rows": snapshot["rows"] if snapshot else [],
+            "source": snapshot["source"] if snapshot else "",
+            "fetched_at": snapshot["fetched_at"] if snapshot else None,
+            "stale": fundamentals_store.is_stale(snapshot),
+        }
+        for kind, snapshot in stored.items()
+    }
+    estimated = any(
+        row.get("Net_Debt_Estimated")
+        for period in periods.values()
+        for row in period["rows"]
+    )
+    return {
+        "ticker": symbol,
+        "summary_columns": SUMMARY_FIELDS,
+        "quality_columns": QUALITY_FIELDS,
+        "periods": periods,
+        "missing": all(not p["rows"] for p in periods.values()),
+        # The proxy is a real number with a caveat, and the caveat has to travel
+        # with it: an estimated net debt propagates into EV and its yield.
+        "net_debt_estimated": bool(estimated),
+    }
+
+
+@router.post("/tickers/{ticker}/fundamentals/refresh", status_code=202)
+def refresh_fundamentals(
+    ticker: str,
+    background: BackgroundTasks,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Go and get the statements. A write, so this one is allowed to fetch."""
+    from fa.api.deps import build_market
+    from fa.warm import warm_fundamentals
+
+    symbol = ticker.upper()
+    background.add_task(warm_fundamentals, db, build_market(db), symbol, force=True)
+    return {"ticker": symbol, "status": "running"}
 
 
 @router.post("/tickers/{ticker}/check", status_code=202)

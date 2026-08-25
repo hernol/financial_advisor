@@ -32,7 +32,13 @@ TENANT_TABLES = (
     "check_runs",
 )
 
-SHARED_TABLES = ("daily_bars", "indicator_snapshots", "data_fetches", "price_snapshots")
+SHARED_TABLES = (
+    "daily_bars",
+    "indicator_snapshots",
+    "data_fetches",
+    "price_snapshots",
+    "fundamental_snapshots",
+)
 
 # The single account every local install runs under. Hosted deployments create
 # one per sign-up; the id is only special in that migrations adopt orphan rows
@@ -303,6 +309,17 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     previous_close {REAL}
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_ticker ON price_snapshots(ticker, taken_at DESC);
+
+CREATE TABLE IF NOT EXISTS fundamental_snapshots (
+    ticker      TEXT NOT NULL,
+    period_kind TEXT NOT NULL,
+    rows        {JSON} NOT NULL DEFAULT '[]',
+    source      TEXT NOT NULL DEFAULT '',
+    shares      {REAL},
+    price       {REAL},
+    fetched_at  TEXT NOT NULL,
+    PRIMARY KEY (ticker, period_kind)
+);
 
 CREATE TABLE IF NOT EXISTS data_fetches (
     id          {ID_PK},
