@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import pytest
 
-from fa.config import DEFAULT_BENCHMARK, DEFAULT_GEMINI_MODEL, DEFAULT_LOCAL_AI_URL, load_settings
+from fa.config import (
+    DEFAULT_BENCHMARK,
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_LOCAL_AI_URL,
+    load_settings,
+)
 
 
 @pytest.fixture(autouse=True)
