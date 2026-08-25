@@ -26,6 +26,7 @@ from fa.api.auth import account_id
 from fa.api.deps import build_market, get_db
 from fa.config import load_settings
 from fa.errors import FinancialAnalyzerError
+from fa.jsonblock import strip_json
 from fa.localai import LocalAIClient
 from fa.store import events as events_store
 from fa.store import history as history_store
@@ -175,7 +176,9 @@ def list_analyses(
             "id": row["id"],
             "ticker": row["ticker"],
             "model": row["model"],
-            "report": row["report"],
+            # Reports written before the prose was stripped still carry the
+            # block, so it comes off on the way out as well.
+            "report": strip_json(row["report"]),
             "created_at": row["created_at"],
             # The provenance line is the first block of the stored metrics, and
             # it is what says which numbers the model was actually given.

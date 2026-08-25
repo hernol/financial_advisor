@@ -8,7 +8,7 @@ from fa.alerts import kinds
 from fa.alerts.suggestions import parse_suggestions
 from fa.config import Settings
 from fa.errors import ConfigError
-from fa.jsonblock import extract_json
+from fa.jsonblock import extract_json, strip_json
 from fa.local_tasks import catalogue_hint, repair_suggestions
 from fa.localai import LocalAIClient
 from fa.models import AIReport
@@ -103,7 +103,11 @@ def analyze(
 
     return AIReport(
         ticker=ticker,
-        text=text or "(Gemini devolvió una respuesta vacía)",
+        # The block is parsed into suggestions below and shown as its own
+        # cards, so keeping it in the prose only makes the reader scroll past
+        # it. Suggestions are extracted from the original, not the stripped
+        # text — stripping first would leave nothing to parse.
+        text=strip_json(text) or "(Gemini devolvió una respuesta vacía)",
         suggestions=extract_suggestions(text, ticker, local_client),
         model=settings.gemini_model,
         provenance=data_pack.provenance,

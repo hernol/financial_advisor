@@ -311,3 +311,15 @@ def test_without_pasted_text_that_step_is_skipped(conn):
 
     reporting.build_pack(conn, Market(), None, "PODD", "", on_stage=stages.append)
     assert reporting.READING not in stages
+
+
+def test_a_served_report_carries_no_json_block(client, conn, monkeypatch, with_key):
+    """Reports written before the prose was stripped come out clean anyway."""
+    events_store.save_analysis(
+        conn, "PODD", "m", "prov", "",
+        'Veredicto: mantener.\n\n## Sugerencias (JSON)\n\n```json\n[{"kind": "rsi"}]\n```\n',
+    )
+    body = client.get("/api/tickers/PODD/analyses").json()[0]
+    assert "```" not in body["report"]
+    assert '"kind"' not in body["report"]
+    assert "Veredicto: mantener." in body["report"]
