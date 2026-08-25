@@ -118,8 +118,9 @@ class Transaction:
     fees: float = 0.0
     currency: str = "USD"
     note: str = ""
-    source: str = "manual"  # manual | import | split_detected
+    source: str = "manual"  # manual | import | split_detected | correction
     position_id: int | None = None
+    replaces_id: int | None = None
     id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None

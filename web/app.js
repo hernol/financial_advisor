@@ -727,17 +727,30 @@ const TX_KINDS = [
   ['split', 'Split'], ['fee', 'Comisión'],
 ];
 
-function openTransactionForm(ticker = '') {
+function openTransactionForm(ticker = '', existing = null) {
   const today = new Date().toISOString().slice(0, 10);
-  const kind = field('kind', 'Tipo', { options: TX_KINDS, value: 'buy' });
-  const symbol = field('ticker', 'Ticker', { value: ticker, required: true });
-  const when = field('trade_date', 'Fecha', { type: 'date', value: today, required: true });
-  const quantity = field('quantity', 'Cantidad', { type: 'number', step: 'any', min: 0 });
-  const price = field('price', 'Precio por acción', { type: 'number', step: 'any', min: 0 });
-  const amount = field('amount', 'Monto total', { type: 'number', step: 'any' });
-  const ratio = field('ratio', 'Ratio del split', { type: 'number', step: 'any', min: 0,
-    hint: '4 significa 4 acciones nuevas por cada una vieja.' });
-  const fees = field('fees', 'Comisiones', { type: 'number', step: 'any', min: 0, value: '0' });
+  const v = existing || {};
+  const kind = field('kind', 'Tipo', { options: TX_KINDS, value: v.kind || 'buy' });
+  const symbol = field('ticker', 'Ticker', { value: v.ticker || ticker, required: true });
+  const when = field('trade_date', 'Fecha', {
+    type: 'date', value: v.trade_date || today, required: true,
+  });
+  const quantity = field('quantity', 'Cantidad', {
+    type: 'number', step: 'any', min: 0, value: v.quantity ?? '',
+  });
+  const price = field('price', 'Precio por acción', {
+    type: 'number', step: 'any', min: 0, value: v.price ?? '',
+  });
+  const amount = field('amount', 'Monto total', {
+    type: 'number', step: 'any', value: v.amount ?? '',
+  });
+  const ratio = field('ratio', 'Ratio del split', {
+    type: 'number', step: 'any', min: 0, value: v.ratio ?? '',
+    hint: '4 significa 4 acciones nuevas por cada una vieja.',
+  });
+  const fees = field('fees', 'Comisiones', {
+    type: 'number', step: 'any', min: 0, value: v.fees ?? '0',
+  });
 
   // Progressive disclosure: a split has no price and a cash dividend has no
   // share count. Showing every field for every kind invites wrong entries.
@@ -753,17 +766,34 @@ function openTransactionForm(ticker = '') {
   kind.querySelector('select').addEventListener('change', paint);
   paint();
 
-  sheet.open('Cargar movimiento',
-    [kind, symbol, when, quantity, price, ratio, amount, fees], async () => {
-      const v = formValues();
+  const title = existing ? 'Corregir movimiento' : 'Cargar movimiento';
+  const fields = [kind, symbol, when, quantity, price, ratio, amount, fees];
+  if (existing) {
+    // The ledger keeps the original; saying so is the difference between an
+    // edit the user can trust and one they wonder about later.
+    const note = document.createElement('p');
+    note.className = 'hint';
+    note.textContent = 'Se guarda como corrección: la entrada original queda registrada.';
+    fields.push(note);
+  }
+
+  sheet.open(title, fields, async () => {
+      const values = formValues();
       const body = {
-        ticker: v.ticker.toUpperCase(),
-        kind: v.kind,
-        trade_date: v.trade_date,
-        fees: v.fees === '' ? 0 : Number(v.fees),
+        ticker: values.ticker.toUpperCase(),
+        kind: values.kind,
+        trade_date: values.trade_date,
+        fees: values.fees === '' ? 0 : Number(values.fees),
       };
       for (const key of ['quantity', 'price', 'amount', 'ratio']) {
-        if (v[key] !== '' && v[key] !== undefined) body[key] = Number(v[key]);
+        if (values[key] !== '' && values[key] !== undefined) body[key] = Number(values[key]);
+      }
+      if (existing) {
+        await send(`/api/portfolio/transactions/${existing.id}`, 'PATCH', body);
+        sheet.close();
+        await loadPortfolio();
+        showOk('Movimiento corregido.');
+        return;
       }
       const created = await send('/api/portfolio/transactions', 'POST', body);
       sheet.close();
@@ -971,13 +1001,34 @@ function renderLedger(txs) {
     else if (t.price != null && t.quantity != null) {
       detail = `${num(t.quantity, t.quantity % 1 ? 4 : 0)} × ${money(t.price)}`;
     } else if (t.amount != null) detail = 'en efectivo';
+    const fee = t.fees ? `comisión ${money(t.fees)}` : '';
     li.innerHTML = `
       <div class="tx-top">
         <span class="tx-kind">${t.ticker} · ${KIND_LABEL[t.kind] || t.kind}</span>
         <span class="tx-cash ${t.cash_flow > 0 ? 'in' : 'out'}">${
           t.cash_flow ? signed(t.cash_flow) : ''}</span>
       </div>
-      <div class="tx-sub"><span>${t.trade_date}</span><span>${detail}</span></div>`;
+      <div class="tx-sub">
+        <span>${t.trade_date}</span><span>${detail}</span>${fee ? `<span>${fee}</span>` : ''}
+        ${t.corrected ? '<span class="chip neutral">corregido</span>' : ''}
+      </div>
+      <div class="alert-actions">
+        <button class="mini" data-act="edit">Editar</button>
+        <button class="mini danger" data-act="drop" aria-label="Borrar movimiento">
+          <svg aria-hidden="true"><use href="#i-trash"/></svg>
+        </button>
+      </div>`;
+    li.querySelector('[data-act="edit"]').addEventListener('click', () => {
+      openTransactionForm(t.ticker, t);
+    });
+    li.querySelector('[data-act="drop"]').addEventListener('click', async () => {
+      if (!confirm(`¿Borrar el movimiento de ${t.ticker}? Queda registrado en el historial.`)) return;
+      try {
+        await send(`/api/portfolio/transactions/${t.id}`, 'DELETE');
+        showOk('Movimiento borrado.');
+        await loadPortfolio();
+      } catch (e) { showError(e.message); }
+    });
     list.appendChild(li);
   }
 }

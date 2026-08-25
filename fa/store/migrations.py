@@ -494,6 +494,18 @@ def _migrate_tenancy(db: Database) -> None:
         db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {definition}")
 
 
+# --- v11: corrections -------------------------------------------------------
+# Editing a ledger entry in place would make a corrected typo and a rewritten
+# number look identical afterwards. A correction is therefore a new entry that
+# points at the one it replaces, and the original stays on file, retired.
+
+def _migrate_corrections(db: Database) -> None:
+    add_column(db, "transactions", "replaces_id", "{FK_ID}")
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tx_replaces ON transactions(replaces_id)"
+    )
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "transaction ledger", _migrate_ledger, sqlite_only=True),
     Migration(4, "drop destructive cascades", _migrate_no_cascade, sqlite_only=True),
@@ -503,6 +515,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(8, "sync cursors and soft deletes", _migrate_sync, sqlite_only=True),
     Migration(9, "backfill the ledger from existing positions", _migrate_backfill, sqlite_only=True),
     Migration(10, "accounts and the account_id column", _migrate_tenancy),
+    Migration(11, "corrections point at what they replace", _migrate_corrections),
 )
 
 TARGET_VERSION = max(m.version for m in MIGRATIONS)

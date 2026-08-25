@@ -117,6 +117,7 @@ def row_to_transaction(row: Row) -> Transaction:
         currency=row["currency"],
         note=row["note"],
         source=row["source"],
+        replaces_id=_optional(row, "replaces_id"),
         created_at=parse_datetime(row["created_at"]),
         updated_at=parse_datetime(row["updated_at"]),
     )

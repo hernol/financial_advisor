@@ -99,10 +99,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     currency    TEXT NOT NULL DEFAULT 'USD',
     note        TEXT NOT NULL DEFAULT '',
     source      TEXT NOT NULL DEFAULT 'manual',
+    replaces_id {FK_ID},
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     deleted_at  TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_tx_replaces ON transactions(replaces_id);
 CREATE INDEX IF NOT EXISTS idx_tx_ticker ON transactions(account_id, ticker, trade_date);
 CREATE INDEX IF NOT EXISTS idx_tx_position ON transactions(position_id);
 CREATE INDEX IF NOT EXISTS idx_tx_updated ON transactions(updated_at);

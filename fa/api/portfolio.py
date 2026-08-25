@@ -167,6 +167,8 @@ def transactions(
             "cash_flow": e.cash_flow,
             "note": e.note,
             "source": e.source,
+            "replaces_id": e.replaces_id,
+            "corrected": e.source == "correction",
         }
         for e in entries[:limit]
     ]
@@ -277,6 +279,68 @@ def add_transaction(
         "trade_date": entry.trade_date.isoformat(),
         "cash_flow": entry.cash_flow,
         "fetching_prices": fetching,
+    }
+
+
+class TransactionPatch(BaseModel):
+    """The fields a correction may change. Everything is optional: what is not
+    sent keeps the value it had."""
+
+    ticker: str | None = Field(default=None, min_length=1, max_length=12)
+    kind: str | None = None
+    trade_date: date | None = None
+    quantity: float | None = Field(default=None, gt=0)
+    price: float | None = Field(default=None, gt=0)
+    amount: float | None = None
+    ratio: float | None = Field(default=None, gt=0)
+    fees: float | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
+@router.patch("/transactions/{transaction_id}")
+def amend_transaction(
+    transaction_id: int,
+    body: TransactionPatch,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Correct an entry.
+
+    Implemented as a replacement rather than an update: the original is retired
+    and the correction points at it. The client calls this "editar" because
+    that is what the user is doing; the ledger stays append-only underneath.
+    """
+    from fa.store import transactions as transactions_store
+
+    changes = body.model_dump(exclude_none=True)
+    if not changes:
+        raise HTTPException(status_code=422, detail="No mandaste ningún cambio.")
+    if "kind" in changes and changes["kind"] not in models.TRANSACTION_KINDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Tipo '{changes['kind']}' desconocido. Válidos: "
+            f"{', '.join(models.TRANSACTION_KINDS)}.",
+        )
+    if changes.get("trade_date") and changes["trade_date"] > date.today():
+        raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
+    if "ticker" in changes:
+        changes["ticker"] = changes["ticker"].upper()
+
+    corrected = transactions_store.amend(db, transaction_id, changes, account_id=account)
+    if corrected is None:
+        raise HTTPException(
+            status_code=404, detail=f"No existe el movimiento {transaction_id}."
+        )
+    return {
+        "id": corrected.id,
+        "replaces_id": corrected.replaces_id,
+        "ticker": corrected.ticker,
+        "kind": corrected.kind,
+        "trade_date": corrected.trade_date.isoformat(),
+        "quantity": corrected.quantity,
+        "price": corrected.price,
+        "fees": corrected.fees,
+        "cash_flow": corrected.cash_flow,
     }
 
 

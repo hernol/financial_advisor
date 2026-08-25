@@ -187,6 +187,19 @@ escriben en el mismo libro y leen el mismo resumen.
 Si cargás un ticker que el sistema no tenía, **va a buscar su historial solo**. Tarda un par
 de segundos y la app avisa mientras lo trae; no hace falta correr nada a mano.
 
+### Corregir un movimiento
+
+Cada fila del libro tiene **Editar**. Te olvidaste la comisión, pusiste mal el precio, erraste
+la fecha: se arregla ahí, con el formulario precargado.
+
+Por dentro **no se sobrescribe nada**. La entrada vieja se retira y la corregida ocupa su
+lugar apuntando a la que reemplaza. Eso es lo que mantiene el libro append-only: un typo
+corregido y un número cambiado tres meses después siguen siendo distinguibles, que es toda la
+razón de tener un libro mayor y no una tabla de valores actuales.
+
+En la lista aparece la versión vigente, marcada como `corregido`. El original queda guardado
+y se puede recuperar; la cuenta usa sólo la corrección, nunca las dos.
+
 ---
 
 ## 3. Trabajar sobre un ticker
