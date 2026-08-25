@@ -11,6 +11,10 @@ COPY fa ./fa
 
 # The SQLite database and the alert log live here; mount it as a volume.
 ENV FA_DATA_DIR=/app/data
+# Unbuffered: without it Python holds stdout in a pipe, so warnings printed
+# before the server starts — including the one about running without
+# authentication — never reach `docker compose logs`.
+ENV PYTHONUNBUFFERED=1
 VOLUME ["/app/data"]
 
 ENTRYPOINT ["python", "financial_analyzer.py"]

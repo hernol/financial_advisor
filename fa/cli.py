@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import pathlib
 import secrets
 import sys
 from datetime import date
@@ -157,6 +158,21 @@ def _lan_address() -> str:
         probe.close()
 
 
+def _in_container() -> bool:
+    """True when this process is inside a container.
+
+    Matters because binding 0.0.0.0 there is not exposure: it is the only way
+    to be reachable at all, and what actually decides who can reach it is the
+    port mapping on the host, which this process cannot see.
+    """
+    if pathlib.Path("/.dockerenv").exists():
+        return True
+    try:
+        return "docker" in pathlib.Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the API and the web client on one port.
 
@@ -179,7 +195,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     settings = load_settings()
     mode = mode_for(settings)
     host = "0.0.0.0" if args.lan else args.host  # noqa: S104 - deliberate, guarded below
-    exposed = host not in {"127.0.0.1", "localhost", "::1"}
+    contained = _in_container()
+    # Inside a container the bind address says nothing about who can reach the
+    # server: the port mapping on the host decides that, and this process
+    # cannot see it. Outside, the bind address is exactly the exposure.
+    exposed = host not in {"127.0.0.1", "localhost", "::1"} and not contained
 
     if exposed and mode == OPEN and not args.insecure:
         print(
@@ -194,12 +214,22 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     if exposed and mode == OPEN:
         print("⚠️  Escuchando en toda la red SIN autenticación (--insecure).")
+    elif contained and mode == OPEN:
+        print(
+            "⚠️  Sin autenticación: quién llega depende de cómo compose publique el\n"
+            "   puerto. Con 127.0.0.1:8000 sólo esta máquina; si lo abrís a la red,\n"
+            "   poné FA_API_TOKEN en el .env primero."
+        )
 
-    url = f"http://{_lan_address() if exposed else host}:{args.port}"
-    print(f"📊 Dashboard en {url}")
-    if exposed:
-        print(f"   Abrilo desde el celular en esa misma URL. Modo de acceso: {mode}.")
-    print("   Ctrl+C para cortar.")
+    if contained:
+        # The container's own address is meaningless outside it.
+        print(f"📊 Dashboard en http://localhost:{args.port} (según el mapeo de compose)")
+    else:
+        where = _lan_address() if exposed else host
+        print(f"📊 Dashboard en http://{where}:{args.port}")
+        if exposed:
+            print(f"   Abrilo desde el celular en esa misma URL. Modo de acceso: {mode}.")
+    print(f"   Acceso: {mode}. Ctrl+C para cortar.")
     uvicorn.run("fa.api.app:app", host=host, port=args.port, reload=args.reload)
     return 0
 

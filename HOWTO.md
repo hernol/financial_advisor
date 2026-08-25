@@ -396,11 +396,23 @@ python financial_analyzer.py serve
 # → http://127.0.0.1:8000
 ```
 
-Con Docker:
+Con Docker hay un servicio dedicado:
 
 ```bash
-docker compose run --rm --service-ports analyzer serve --host 0.0.0.0
+docker compose up -d dashboard      # → http://localhost:8000
+docker compose logs -f dashboard    # para ver qué hizo al arrancar
+docker compose down dashboard       # para bajarlo
 ```
+
+Queda levantado solo (`restart: unless-stopped`), así que sobrevive a un reinicio.
+
+**El puerto se publica en `127.0.0.1:8000` a propósito**: adentro del contenedor el proceso
+escucha en `0.0.0.0` porque es la única forma de ser alcanzable, pero quién llega de verdad
+lo decide el mapeo del compose. Para abrirlo a la red, poné `FA_API_TOKEN` en el `.env` y
+cambiá el mapeo a `"8000:8000"`.
+
+El servicio monta `./web`, así que un cambio en el cliente se ve recargando la página, sin
+rebuild de la imagen.
 
 Por defecto escucha sólo en `127.0.0.1`, así que no sale de la máquina.
 

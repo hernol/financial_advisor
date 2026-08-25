@@ -29,6 +29,35 @@ services:
       - .:/app
       - ./data:/app/data
 
+  # The dashboard: API plus the web app on one port.
+  #   docker compose up -d dashboard   →   http://localhost:8000
+  #
+  # Published on 127.0.0.1 on purpose, so it is private by default. To reach it
+  # from the phone, put FA_API_TOKEN in the .env and change the mapping to
+  # "8000:8000" — the port mapping is what decides who can get in, not the
+  # address the process binds inside the container.
+  dashboard:
+    build: .
+    image: financial_analyzer:latest
+    container_name: financial_analyzer_web
+    user: "${UID:-1000}:${GID:-1000}"
+    command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - FA_API_TOKEN=${FA_API_TOKEN:-}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - DATABASE_URL=${DATABASE_URL:-}
+      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
+    volumes:
+      - ./data:/app/data
+      # The client is static files; mounting it means an edit shows up on
+      # reload instead of needing an image rebuild.
+      - ./web:/app/web
+
   # One-shot alert check, driven by the systemd timer on the host (see
   # scripts/setup-systemd.sh). --trigger labels the row it writes to
   # check_runs, so a scheduled run is distinguishable from a manual one.
