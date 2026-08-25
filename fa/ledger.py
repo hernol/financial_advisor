@@ -19,6 +19,7 @@ from fa import models
 from fa.models import Transaction
 from fa.store import transactions as transactions_store
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 
 
 @dataclass(frozen=True)
@@ -101,13 +102,21 @@ def replay(ticker: str, entries: Sequence[Transaction]) -> Holding:
     )
 
 
-def holding(conn: Database, ticker: str) -> Holding:
-    return replay(ticker, transactions_store.list_transactions(conn, ticker=ticker))
+def holding(conn: Database, ticker: str, *, account_id: int = LOCAL_ACCOUNT_ID) -> Holding:
+    return replay(
+        ticker,
+        transactions_store.list_transactions(conn, ticker=ticker, account_id=account_id),
+    )
 
 
-def holdings(conn: Database, *, open_only: bool = True) -> list[Holding]:
+def holdings(
+    conn: Database, *, open_only: bool = True, account_id: int = LOCAL_ACCOUNT_ID
+) -> list[Holding]:
     """Every ticker the ledger knows about, replayed."""
-    result = [holding(conn, ticker) for ticker in transactions_store.tickers(conn)]
+    result = [
+        holding(conn, ticker, account_id=account_id)
+        for ticker in transactions_store.tickers(conn, account_id=account_id)
+    ]
     if open_only:
         result = [h for h in result if h.is_open]
     return sorted(result, key=lambda h: h.ticker)

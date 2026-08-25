@@ -402,9 +402,46 @@ Con Docker:
 docker compose run --rm --service-ports analyzer serve --host 0.0.0.0
 ```
 
-**Escucha en 127.0.0.1 a propósito: todavía no hay autenticación.** Si la exponés en
-`0.0.0.0`, cualquiera que llegue a ese puerto ve la cartera entera. Para usarla desde el
-celular, lo prolijo es una VPN tipo Tailscale, no abrir el puerto en el router.
+Por defecto escucha sólo en `127.0.0.1`, así que no sale de la máquina.
+
+### Verla desde el celular en la red local
+
+```bash
+# 1. poné un token en el .env
+FA_API_TOKEN=pegá-acá-una-cadena-larga-y-random
+
+# 2. levantá para toda la red
+python financial_analyzer.py serve --lan
+# 📊 Dashboard en http://192.168.0.14:8000
+```
+
+Abrí esa URL en el celular, pegá el token una vez y queda guardado. `--lan` **se niega a
+arrancar sin autenticación**: sin token, cualquiera en la red vería la cartera y podría
+cargar movimientos. Si la red es de confianza y querés saltearlo igual, existe
+`--lan --insecure`, pero es tu responsabilidad.
+
+Para llegar desde afuera de tu casa, una VPN tipo Tailscale sigue siendo mejor que abrir
+el puerto en el router.
+
+### Modos de acceso
+
+El servidor elige el modo solo, según lo que haya configurado:
+
+| Configuración | Modo | Para qué |
+|---|---|---|
+| nada | `open` | Uso local, sólo loopback |
+| `FA_API_TOKEN` | `token` | Tu red: una cuenta, un secreto compartido |
+| `SUPABASE_URL` + `SUPABASE_JWT_SECRET` | `supabase` | Varios usuarios, cada uno con su cuenta |
+
+Con Supabase, los valores salen de *Project Settings → API* (la URL y la clave `anon`) y de
+*Project Settings → API → JWT Settings* (el secreto). Necesitás además el paquete `pyjwt`.
+La app muestra un login con email y contraseña, y **cada usuario nuevo estrena su propia
+cuenta la primera vez que entra**: sus posiciones, alertas e historial no se cruzan con los
+de nadie.
+
+```bash
+pip install pyjwt
+```
 
 ### Instalarla en el celular
 

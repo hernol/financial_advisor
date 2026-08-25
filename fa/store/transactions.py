@@ -11,17 +11,21 @@ from typing import Sequence
 
 from fa.models import Transaction
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 from fa.store.serde import row_to_transaction, to_iso
 
 
-def record(conn: Database, transaction: Transaction) -> Transaction:
+def record(
+    conn: Database, transaction: Transaction, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Transaction:
     """Append one entry to the ledger."""
     now = datetime.now(timezone.utc)
     new_id = conn.insert(
-        "INSERT INTO transactions(position_id, ticker, kind, trade_date, quantity, price, "
-        "amount, ratio, fees, currency, note, source, created_at, updated_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO transactions(account_id, position_id, ticker, kind, trade_date, quantity, "
+        "price, amount, ratio, fees, currency, note, source, created_at, updated_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            account_id,
             transaction.position_id,
             transaction.ticker.upper(),
             transaction.kind,
@@ -51,10 +55,11 @@ def list_transactions(
     since: date | None = None,
     include_deleted: bool = False,
     limit: int | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> list[Transaction]:
     sql = "SELECT * FROM transactions"
-    clauses: list[str] = []
-    params: list[object] = []
+    clauses: list[str] = ["account_id = ?"]
+    params: list[object] = [account_id]
     if not include_deleted:
         clauses.append("deleted_at IS NULL")
     if ticker:
@@ -78,25 +83,35 @@ def list_transactions(
     return [row_to_transaction(row) for row in conn.execute(sql, params)]
 
 
-def get_transaction(conn: Database, transaction_id: int) -> Transaction | None:
-    row = conn.execute("SELECT * FROM transactions WHERE id = ?", (transaction_id,)).fetchone()
+def get_transaction(
+    conn: Database, transaction_id: int, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Transaction | None:
+    row = conn.execute(
+        "SELECT * FROM transactions WHERE id = ? AND account_id = ?",
+        (transaction_id, account_id),
+    ).fetchone()
     return row_to_transaction(row) if row else None
 
 
-def soft_delete(conn: Database, transaction_id: int) -> bool:
+def soft_delete(
+    conn: Database, transaction_id: int, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> bool:
     """Retire an entry without erasing it."""
     stamp = to_iso(datetime.now(timezone.utc))
     cur = conn.execute(
-        "UPDATE transactions SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
-        (stamp, stamp, transaction_id),
+        "UPDATE transactions SET deleted_at = ?, updated_at = ? "
+        "WHERE id = ? AND account_id = ? AND deleted_at IS NULL",
+        (stamp, stamp, transaction_id, account_id),
     )
     conn.commit()
     return cur.rowcount > 0
 
 
-def tickers(conn: Database) -> list[str]:
+def tickers(conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID) -> list[str]:
     rows = conn.execute(
-        "SELECT DISTINCT ticker FROM transactions WHERE deleted_at IS NULL ORDER BY ticker"
+        "SELECT DISTINCT ticker FROM transactions "
+        "WHERE deleted_at IS NULL AND account_id = ? ORDER BY ticker",
+        (account_id,),
     )
     return [row["ticker"] for row in rows]
 

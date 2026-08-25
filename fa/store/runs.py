@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 from fa.store.serde import dump_json, load_json, to_iso
 
 FIRED = "fired"
@@ -28,10 +29,16 @@ def start_run(
     trigger: str = "manual",
     ticker: str | None = None,
     started_at: datetime | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     new_id = conn.insert(
-        "INSERT INTO check_runs(trigger, ticker, started_at) VALUES(?, ?, ?)",
-        (trigger, ticker.upper() if ticker else None, to_iso(started_at or datetime.now(timezone.utc))),
+        "INSERT INTO check_runs(account_id, trigger, ticker, started_at) VALUES(?, ?, ?, ?)",
+        (
+            account_id,
+            trigger,
+            ticker.upper() if ticker else None,
+            to_iso(started_at or datetime.now(timezone.utc)),
+        ),
     )
     conn.commit()
     return new_id
@@ -83,12 +90,14 @@ def record_evaluation(
     price: float | None = None,
     detail: Mapping[str, Any] | None = None,
     evaluated_at: datetime | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     """One alert, one moment, one outcome — including the times it stayed quiet."""
     new_id = conn.insert(
-        "INSERT INTO alert_evaluations(run_id, alert_id, ticker, kind, outcome, price, detail, "
-        "evaluated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO alert_evaluations(account_id, run_id, alert_id, ticker, kind, outcome, "
+        "price, detail, evaluated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            account_id,
             run_id,
             alert_id,
             ticker.upper(),
@@ -111,11 +120,19 @@ def record_delivery(
     status: str,
     error: str = "",
     attempted_at: datetime | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     new_id = conn.insert(
-        "INSERT INTO delivery_attempts(event_id, channel, status, error, attempted_at) "
-        "VALUES(?, ?, ?, ?, ?)",
-        (event_id, channel, status, error, to_iso(attempted_at or datetime.now(timezone.utc))),
+        "INSERT INTO delivery_attempts(account_id, event_id, channel, status, error, attempted_at) "
+        "VALUES(?, ?, ?, ?, ?, ?)",
+        (
+            account_id,
+            event_id,
+            channel,
+            status,
+            error,
+            to_iso(attempted_at or datetime.now(timezone.utc)),
+        ),
     )
     conn.commit()
     return new_id
@@ -150,8 +167,13 @@ def record_fetch(
     return new_id
 
 
-def recent_runs(conn: Database, limit: int = 50) -> list[Mapping[str, Any]]:
-    rows = conn.execute("SELECT * FROM check_runs ORDER BY started_at DESC LIMIT ?", (limit,))
+def recent_runs(
+    conn: Database, limit: int = 50, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> list[Mapping[str, Any]]:
+    rows = conn.execute(
+        "SELECT * FROM check_runs WHERE account_id = ? ORDER BY started_at DESC LIMIT ?",
+        (account_id, limit),
+    )
     out = []
     for row in rows:
         item = dict(row)
@@ -160,17 +182,20 @@ def recent_runs(conn: Database, limit: int = 50) -> list[Mapping[str, Any]]:
     return out
 
 
-def last_run(conn: Database) -> Mapping[str, Any] | None:
-    runs = recent_runs(conn, limit=1)
+def last_run(
+    conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Mapping[str, Any] | None:
+    runs = recent_runs(conn, limit=1, account_id=account_id)
     return runs[0] if runs else None
 
 
 def evaluations_for(
-    conn: Database, alert_id: int, *, limit: int = 200
+    conn: Database, alert_id: int, *, limit: int = 200, account_id: int = LOCAL_ACCOUNT_ID
 ) -> list[Mapping[str, Any]]:
     rows = conn.execute(
-        "SELECT * FROM alert_evaluations WHERE alert_id = ? ORDER BY evaluated_at DESC LIMIT ?",
-        (alert_id, limit),
+        "SELECT * FROM alert_evaluations WHERE alert_id = ? AND account_id = ? "
+        "ORDER BY evaluated_at DESC LIMIT ?",
+        (alert_id, account_id, limit),
     )
     out = []
     for row in rows:
@@ -181,9 +206,9 @@ def evaluations_for(
     return out
 
 
-def health(conn: Database) -> Mapping[str, Any]:
+def health(conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID) -> Mapping[str, Any]:
     """Everything the dashboard's status badge needs in one query set."""
-    latest = last_run(conn)
+    latest = last_run(conn, account_id=account_id)
     # Timestamps are stored as ISO 8601 text on both engines, so the cutoff is
     # computed here and compared as a string: no date functions, no dialects.
     # SUM over a comparison would also differ — `ok = 0` is a boolean on
@@ -192,8 +217,8 @@ def health(conn: Database) -> Mapping[str, Any]:
     row = conn.execute(
         "SELECT COUNT(*) AS runs, SUM(fired) AS fired, "
         "SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed "
-        "FROM check_runs WHERE started_at >= ?",
-        (cutoff,),
+        "FROM check_runs WHERE started_at >= ? AND account_id = ?",
+        (cutoff, account_id),
     ).fetchone()
     return {
         "last_run_at": latest["started_at"] if latest else None,

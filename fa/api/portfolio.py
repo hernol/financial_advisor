@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from fa import ledger, models
+from fa.api.auth import account_id
 from fa.api.deps import get_db
 from fa.store import history as history_store
 from fa.store.database import Database
@@ -34,7 +35,9 @@ def _last_two_closes(db: Database, ticker: str) -> tuple[float | None, float | N
 
 
 @router.get("")
-def portfolio(db: Database = Depends(get_db)) -> dict[str, Any]:
+def portfolio(
+    db: Database = Depends(get_db), account: int = Depends(account_id)
+) -> dict[str, Any]:
     """Every open holding valued at its last stored close."""
     rows: list[dict[str, Any]] = []
     market_value = 0.0
@@ -45,7 +48,7 @@ def portfolio(db: Database = Depends(get_db)) -> dict[str, Any]:
     currency = "USD"
     missing: list[str] = []
 
-    for holding in ledger.holdings(db, open_only=False):
+    for holding in ledger.holdings(db, open_only=False, account_id=account):
         realized += holding.realized_pnl
         dividends += holding.dividends
         fees += holding.fees
@@ -108,6 +111,7 @@ def portfolio(db: Database = Depends(get_db)) -> dict[str, Any]:
 def history(
     days: int = Query(365, ge=5, le=3650),
     db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     """The equity curve, one point per day.
 
@@ -115,7 +119,7 @@ def history(
     point for every day the timer ran — not only the days somebody opened this
     screen.
     """
-    points = history_store.equity_curve(db, days=days)
+    points = history_store.equity_curve(db, days=days, account_id=account)
     return {
         "sessions": len(points),
         "day": [p["day"] for p in points],
@@ -129,11 +133,12 @@ def history(
 def transactions(
     limit: int = Query(50, ge=1, le=500),
     db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> list[dict[str, Any]]:
     """The ledger, newest first: what was bought, sold, split and collected."""
     from fa.store import transactions as transactions_store
 
-    entries = transactions_store.list_transactions(db)
+    entries = transactions_store.list_transactions(db, account_id=account)
     entries.reverse()
     return [
         {
@@ -182,7 +187,9 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 
 @router.post("/transactions", status_code=201)
 def add_transaction(
-    body: TransactionRequest, db: Database = Depends(get_db)
+    body: TransactionRequest,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     """Append one entry to the ledger.
 
@@ -226,6 +233,7 @@ def add_transaction(
             currency=body.currency,
             note=body.note,
         ),
+        account_id=account,
     )
     return {
         "id": entry.id,
@@ -237,11 +245,15 @@ def add_transaction(
 
 
 @router.delete("/transactions/{transaction_id}", status_code=204)
-def remove_transaction(transaction_id: int, db: Database = Depends(get_db)) -> None:
+def remove_transaction(
+    transaction_id: int,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> None:
     """Retire an entry from the rollup without erasing it from the history."""
     from fa.store import transactions as transactions_store
 
-    if not transactions_store.soft_delete(db, transaction_id):
+    if not transactions_store.soft_delete(db, transaction_id, account_id=account):
         raise HTTPException(
             status_code=404, detail=f"No existe el movimiento {transaction_id}."
         )

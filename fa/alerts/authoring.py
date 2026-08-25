@@ -21,6 +21,7 @@ from fa.models import Alert
 from fa.store import alerts as alerts_store
 from fa.store import positions as positions_store
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 
 PriceLookup = Callable[[str], float | None]
 
@@ -40,6 +41,7 @@ def create_alert(
     one_shot: bool | None = None,
     expires_at: date | None = None,
     note: str = "",
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> Alert:
     """Validate and persist an alert, resolving the position it belongs to."""
     definition = kinds.get_kind(kind)
@@ -47,7 +49,7 @@ def create_alert(
     symbol = ticker.upper()
 
     if position_id is None:
-        open_positions = positions_store.positions_for_ticker(conn, symbol)
+        open_positions = positions_store.positions_for_ticker(conn, symbol, account_id=account_id)
         position_id = open_positions[0].id if open_positions else None
     if definition.requires_position and position_id is None:
         raise ValidationError(
@@ -67,7 +69,7 @@ def create_alert(
         expires_at=expires_at,
         note=note,
     )
-    return alerts_store.add_alert(conn, alert)
+    return alerts_store.add_alert(conn, alert, account_id=account_id)
 
 
 def resolve_reference(

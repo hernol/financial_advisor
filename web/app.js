@@ -8,8 +8,32 @@
 
 const $ = (id) => document.getElementById(id);
 
+// The credential lives in localStorage rather than a cookie: there is no
+// cookie to forge from another origin, so no CSRF surface on the writes.
+const session = {
+  key: 'fa.token',
+  get token() { try { return localStorage.getItem(this.key) || ''; } catch { return ''; } },
+  set token(value) {
+    try { value ? localStorage.setItem(this.key, value) : localStorage.removeItem(this.key); }
+    catch { /* private mode: the session simply does not survive a reload */ }
+  },
+  mode: 'open',
+};
+
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const headers = { ...(options.headers || {}) };
+  if (session.token) headers.Authorization = `Bearer ${session.token}`;
+  const response = await fetch(path, { ...options, headers });
+  if (response.status === 401 && !path.includes('/auth-mode')) {
+    // The credential was rejected, so it is worthless; keeping it would loop.
+    // The server's own wording says whether it was wrong or merely expired —
+    // reporting "session expired" for a token that was never valid is a lie.
+    const body = await response.json().catch(() => ({}));
+    const reason = body.detail || 'No se pudo autenticar.';
+    session.token = '';
+    if (!signingIn) showGate(reason);
+    throw new Error(reason);
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     // FastAPI reports its own schema failures as a list of field errors; the
@@ -36,6 +60,10 @@ function showOk(message) {
   clearTimeout(showError.timer);
   showError.timer = setTimeout(() => { box.hidden = true; box.className = 'toast'; }, 3000);
 }
+
+// True while the login form is being submitted: a 401 during sign-in belongs
+// next to the field the user just filled, not as a fresh gate.
+let signingIn = false;
 
 const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi', charts: {}, kinds: null,
@@ -463,6 +491,103 @@ async function loadAlerts() {
 }
 
 
+
+
+// --- puerta de acceso -------------------------------------------------------
+
+async function detectMode() {
+  const body = await api('/api/auth-mode');
+  session.mode = body.mode;
+  session.supabaseUrl = body.supabase_url;
+  session.supabaseKey = body.supabase_anon_key;
+  return body;
+}
+
+function gateFail(message) {
+  const box = $('gate-error');
+  box.textContent = message;
+  box.hidden = false;
+}
+
+function showGate(message = '') {
+  $('gate').hidden = false;
+  $('gate-error').hidden = !message;
+  if (message) $('gate-error').textContent = message;
+  const fields = $('gate-fields');
+  fields.innerHTML = '';
+
+  if (session.mode === 'supabase') {
+    $('gate-lead').textContent = 'Entrá con tu cuenta.';
+    fields.appendChild(field('email', 'Email', { type: 'email', required: true }));
+    fields.appendChild(field('password', 'Contraseña', { type: 'password', required: true }));
+  } else {
+    $('gate-lead').textContent =
+      'Este servidor pide un token. Está en el .env, en FA_API_TOKEN.';
+    fields.appendChild(field('token', 'Token', { type: 'password', required: true }));
+  }
+  const first = fields.querySelector('input');
+  if (first) first.focus();
+}
+
+function hideGate() {
+  $('gate').hidden = true;
+  $('logout').hidden = session.mode === 'open';
+}
+
+async function signIn() {
+  signingIn = true;
+  try {
+    await attemptSignIn();
+  } finally {
+    signingIn = false;
+  }
+}
+
+async function attemptSignIn() {
+  const values = {};
+  for (const el of $('gate-fields').querySelectorAll('input')) values[el.name] = el.value.trim();
+
+  if (session.mode === 'supabase') {
+    // Straight to Supabase's token endpoint. Pulling in their SDK to POST one
+    // form would be the only thing it did.
+    const response = await fetch(
+      `${session.supabaseUrl}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: session.supabaseKey },
+        body: JSON.stringify({ email: values.email, password: values.password }),
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(body.error_description || body.msg || 'No se pudo entrar.');
+    session.token = body.access_token;
+  } else {
+    session.token = values.token;
+  }
+
+  // Prove the credential before dismissing the gate, so a bad one fails here
+  // instead of on the first screen the user sees.
+  await api('/api/session');
+}
+
+async function start() {
+  await detectMode();
+  if (session.mode !== 'open' && !session.token) { showGate(); return; }
+  try {
+    await api('/api/session');
+  } catch {
+    return;  // api() already opened the gate
+  }
+  hideGate();
+  renderRanges();
+  loadStatus();
+  route();
+}
+
+function signOut() {
+  session.token = '';
+  showGate();
+}
 
 // --- hoja inferior ----------------------------------------------------------
 
@@ -935,10 +1060,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
   window.addEventListener('hashchange', route);
 
-  renderRanges();
-  loadStatus();
-  setInterval(loadStatus, 60000);
-  route();
+  $('gate-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = $('gate-submit');
+    button.disabled = true;
+    button.textContent = 'Entrando…';
+    try {
+      await signIn();
+      hideGate();
+      renderRanges();
+      loadStatus();
+      route();
+    } catch (e) {
+      gateFail(e.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Entrar';
+    }
+  });
+  $('logout').addEventListener('click', signOut);
+
+  setInterval(() => { if ($('gate').hidden) loadStatus(); }, 60000);
+  start().catch((e) => showError(e.message));
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(() => { /* offline es un plus, no un requisito */ });

@@ -61,6 +61,21 @@ def add_column(db: Database, table: str, column: str, declaration: str) -> None:
     db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {render_ddl(declaration, db.dialect)}")
 
 
+def sync_identity(db: Database, table: str) -> None:
+    """Move a Postgres identity sequence past the rows already inserted.
+
+    Writing an explicit id — which the local account does, because it has to be
+    a known constant — leaves ``nextval`` behind it, so the next generated id
+    collides. SQLite tracks the maximum itself and needs nothing.
+    """
+    if db.dialect.name == SQLITE:
+        return
+    db.execute(
+        f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+        f"GREATEST((SELECT COALESCE(MAX(id), 1) FROM {table}), 1))"
+    )
+
+
 def ensure_local_account(db: Database) -> None:
     """Guarantee the account every local install runs under.
 
@@ -83,6 +98,7 @@ def ensure_local_account(db: Database) -> None:
             datetime.now(timezone.utc).isoformat(),
         ),
     )
+    sync_identity(db, "accounts")
 
 
 # --- v3: the transaction ledger -------------------------------------------

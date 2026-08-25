@@ -58,6 +58,23 @@
   </symbol>
 </svg>
 
+<section id="gate" class="gate" hidden>
+  <div class="gate-card">
+    <svg class="gate-mark" viewBox="0 0 512 512" aria-hidden="true">
+      <polyline points="96,344 192,240 272,304 416,160" fill="none" stroke="currentColor"
+                stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="416" cy="160" r="30" fill="currentColor"/>
+    </svg>
+    <h1>Financial Analyzer</h1>
+    <p id="gate-lead" class="gate-lead"></p>
+    <form id="gate-form">
+      <div id="gate-fields"></div>
+      <p id="gate-error" class="sheet-error" hidden></p>
+      <button type="submit" class="btn primary" id="gate-submit">Entrar</button>
+    </form>
+  </div>
+</section>
+
 <header class="top">
   <button id="back" class="icon-btn" hidden aria-label="Volver a la lista">
     <svg aria-hidden="true"><use href="#i-back"/></svg>
@@ -175,6 +192,8 @@
     <span>Tickers</span>
   </button>
 </nav>
+
+<button id="logout" class="logout" type="button" hidden>Cerrar sesión</button>
 
 <dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
   <form id="sheet-form" method="dialog">

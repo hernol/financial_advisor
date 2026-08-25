@@ -13,6 +13,7 @@ from typing import Any, Mapping, Sequence
 from fa.analytics import TechnicalSnapshot, to_payload
 from fa.models import PricePoint
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 from fa.store.serde import dump_json, load_json, parse_date, to_iso
 
 
@@ -187,13 +188,15 @@ def save_valuation(
     holdings: Sequence[Mapping[str, Any]] = (),
     currency: str = "USD",
     taken_at: datetime | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     """One point on the equity curve."""
     moment = taken_at or datetime.now(timezone.utc)
     new_id = conn.insert(
-        "INSERT INTO portfolio_valuations(taken_at, day, cost_basis, market_value, pnl_abs, "
-        "pnl_pct, positions, currency, holdings) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO portfolio_valuations(account_id, taken_at, day, cost_basis, market_value, "
+        "pnl_abs, pnl_pct, positions, currency, holdings) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            account_id,
             to_iso(moment),
             moment.date().isoformat(),
             cost_basis,
@@ -209,7 +212,9 @@ def save_valuation(
     return new_id
 
 
-def equity_curve(conn: Database, *, days: int = 365) -> list[Mapping[str, Any]]:
+def equity_curve(
+    conn: Database, *, days: int = 365, account_id: int = LOCAL_ACCOUNT_ID
+) -> list[Mapping[str, Any]]:
     """Daily closing valuation, one row per day (the last of each day wins).
 
     Joining against the per-day maximum rather than selecting bare columns
@@ -220,10 +225,11 @@ def equity_curve(conn: Database, *, days: int = 365) -> list[Mapping[str, Any]]:
     rows = conn.execute(
         "SELECT v.day, v.taken_at, v.market_value, v.cost_basis, v.pnl_abs, v.pnl_pct "
         "FROM portfolio_valuations v "
-        "JOIN (SELECT day AS d, MAX(taken_at) AS latest FROM portfolio_valuations GROUP BY day) m "
+        "JOIN (SELECT day AS d, MAX(taken_at) AS latest FROM portfolio_valuations "
+        "      WHERE account_id = ? GROUP BY day) m "
         "ON m.d = v.day AND m.latest = v.taken_at "
-        "ORDER BY v.day DESC LIMIT ?",
-        (days,),
+        "WHERE v.account_id = ? ORDER BY v.day DESC LIMIT ?",
+        (account_id, account_id, days),
     )
     out = [dict(row) for row in rows]
     out.reverse()

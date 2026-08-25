@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import secrets
 import sys
 from datetime import date
 
@@ -114,6 +115,16 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", default="127.0.0.1", help="127.0.0.1 no sale de la máquina")
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true", help="recarga al editar (desarrollo)")
+    serve.add_argument(
+        "--lan",
+        action="store_true",
+        help="escucha en toda la red local y muestra la URL para el celular",
+    )
+    serve.add_argument(
+        "--insecure",
+        action="store_true",
+        help="permite --lan sin token (no lo uses en una red compartida)",
+    )
     return parser
 
 
@@ -127,11 +138,31 @@ def _parse_params(pairs: list[str]) -> dict[str, str]:
     return params
 
 
+def _lan_address() -> str:
+    """The address this machine answers on in the local network.
+
+    Opening a socket to a public address does not send anything; it just asks
+    the routing table which interface would be used, which is the only reliable
+    way to pick the right one on a machine with several.
+    """
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(("192.0.2.1", 53))  # TEST-NET-1, never routed anywhere
+        return probe.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        probe.close()
+
+
 def _cmd_serve(args: argparse.Namespace) -> int:
     """Run the API and the web client on one port.
 
-    Bound to localhost by default: there is no authentication yet, so exposing
-    it on 0.0.0.0 would publish the portfolio to the network.
+    Bound to localhost unless asked otherwise. Leaving that requires a token,
+    because everything the dashboard shows and everything it can change is
+    reachable by anyone who can open the port.
     """
     try:
         import uvicorn
@@ -141,13 +172,35 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             '   pip install "fastapi>=0.115" "uvicorn[standard]>=0.32"'
         )
         return 1
-    if args.host not in {"127.0.0.1", "localhost", "::1"}:
+
+    from fa.api.auth import OPEN, mode_for
+    from fa.config import load_settings
+
+    settings = load_settings()
+    mode = mode_for(settings)
+    host = "0.0.0.0" if args.lan else args.host  # noqa: S104 - deliberate, guarded below
+    exposed = host not in {"127.0.0.1", "localhost", "::1"}
+
+    if exposed and mode == OPEN and not args.insecure:
         print(
-            f"⚠️  Escuchando en {args.host}: la API todavía no tiene autenticación.\n"
-            "   Cualquiera que llegue a ese puerto ve la cartera entera."
+            "🚫 Sin autenticación no se puede salir de esta máquina.\n"
+            "   Cualquiera en la red vería la cartera y podría cargar movimientos.\n\n"
+            "   Elegí una:\n"
+            f"     1) Token compartido — agregá al .env:  FA_API_TOKEN={secrets.token_urlsafe(24)}\n"
+            "     2) Supabase — configurá SUPABASE_URL y SUPABASE_JWT_SECRET\n"
+            "     3) Red de confianza y bajo tu responsabilidad:  --lan --insecure"
         )
-    print(f"📊 Dashboard en http://{args.host}:{args.port}  (Ctrl+C para cortar)")
-    uvicorn.run("fa.api.app:app", host=args.host, port=args.port, reload=args.reload)
+        return 2
+
+    if exposed and mode == OPEN:
+        print("⚠️  Escuchando en toda la red SIN autenticación (--insecure).")
+
+    url = f"http://{_lan_address() if exposed else host}:{args.port}"
+    print(f"📊 Dashboard en {url}")
+    if exposed:
+        print(f"   Abrilo desde el celular en esa misma URL. Modo de acceso: {mode}.")
+    print("   Ctrl+C para cortar.")
+    uvicorn.run("fa.api.app:app", host=host, port=args.port, reload=args.reload)
     return 0
 
 

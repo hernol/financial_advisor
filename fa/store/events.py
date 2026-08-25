@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 from fa.models import Quote, Signal
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 from fa.store.serde import dump_json, load_json, to_iso
 
 
@@ -16,13 +17,15 @@ def record_event(
     *,
     run_id: int | None = None,
     price: float | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     stamp = to_iso(datetime.now(timezone.utc))
     new_id = conn.insert(
-        "INSERT INTO alert_events(alert_id, run_id, ticker, kind, title, message, severity, "
-        "payload, delivered, price, fired_at, updated_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO alert_events(account_id, alert_id, run_id, ticker, kind, title, message, "
+        "severity, payload, delivered, price, fired_at, updated_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            account_id,
             signal.alert.id,
             run_id,
             signal.alert.ticker,
@@ -41,13 +44,19 @@ def record_event(
     return new_id
 
 
-def recent_events(conn: Database, limit: int = 20, *, unacknowledged_only: bool = False) -> list[dict[str, Any]]:
-    sql = "SELECT * FROM alert_events WHERE deleted_at IS NULL"
+def recent_events(
+    conn: Database,
+    limit: int = 20,
+    *,
+    unacknowledged_only: bool = False,
+    account_id: int = LOCAL_ACCOUNT_ID,
+) -> list[dict[str, Any]]:
+    sql = "SELECT * FROM alert_events WHERE deleted_at IS NULL AND account_id = ?"
     if unacknowledged_only:
         sql += " AND acknowledged_at IS NULL"
     sql += " ORDER BY fired_at DESC LIMIT ?"
     out: list[dict[str, Any]] = []
-    for row in conn.execute(sql, (limit,)):
+    for row in conn.execute(sql, (account_id, limit)):
         item = dict(row)
         item["payload"] = load_json(row["payload"], {})
         item["delivered"] = load_json(row["delivered"], [])
@@ -55,36 +64,37 @@ def recent_events(conn: Database, limit: int = 20, *, unacknowledged_only: bool 
     return out
 
 
-def acknowledge_all(conn: Database) -> int:
+def acknowledge_all(conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID) -> int:
     stamp = to_iso(datetime.now(timezone.utc))
     cur = conn.execute(
-        "UPDATE alert_events SET acknowledged_at = ?, updated_at = ? WHERE acknowledged_at IS NULL",
-        (stamp, stamp),
+        "UPDATE alert_events SET acknowledged_at = ?, updated_at = ? "
+        "WHERE acknowledged_at IS NULL AND account_id = ?",
+        (stamp, stamp, account_id),
     )
     conn.commit()
     return cur.rowcount
 
 
-def acknowledge(conn: Database, event_id: int) -> bool:
+def acknowledge(conn: Database, event_id: int, *, account_id: int = LOCAL_ACCOUNT_ID) -> bool:
     """Mark a single event as seen, which is what a phone actually does."""
     stamp = to_iso(datetime.now(timezone.utc))
     cur = conn.execute(
         "UPDATE alert_events SET acknowledged_at = ?, updated_at = ? "
-        "WHERE id = ? AND acknowledged_at IS NULL",
-        (stamp, stamp, event_id),
+        "WHERE id = ? AND account_id = ? AND acknowledged_at IS NULL",
+        (stamp, stamp, event_id, account_id),
     )
     conn.commit()
     return cur.rowcount > 0
 
 
 def events_for_alert(
-    conn: Database, alert_id: int, limit: int = 100
+    conn: Database, alert_id: int, limit: int = 100, *, account_id: int = LOCAL_ACCOUNT_ID
 ) -> list[dict[str, Any]]:
     """Firing history of one alert; survives the alert being deleted."""
     rows = conn.execute(
-        "SELECT * FROM alert_events WHERE alert_id = ? AND deleted_at IS NULL "
-        "ORDER BY fired_at DESC LIMIT ?",
-        (alert_id, limit),
+        "SELECT * FROM alert_events WHERE alert_id = ? AND account_id = ? "
+        "AND deleted_at IS NULL ORDER BY fired_at DESC LIMIT ?",
+        (alert_id, account_id, limit),
     )
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -120,24 +130,41 @@ def max_snapshot_since(conn: Database, ticker: str, since: str) -> float | None:
 
 
 def save_analysis(
-    conn: Database, ticker: str, model: str, metrics: str, context: str, report: str
+    conn: Database,
+    ticker: str,
+    model: str,
+    metrics: str,
+    context: str,
+    report: str,
+    *,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> int:
     stamp = to_iso(datetime.now(timezone.utc))
     new_id = conn.insert(
-        "INSERT INTO analyses(ticker, model, metrics, context, report, created_at, updated_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?)",
-        (ticker.upper(), model, metrics, context, report, stamp, stamp),
+        "INSERT INTO analyses(account_id, ticker, model, metrics, context, report, created_at, "
+        "updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        (account_id, ticker.upper(), model, metrics, context, report, stamp, stamp),
     )
     conn.commit()
     return new_id
 
 
-def recent_analyses(conn: Database, ticker: str | None = None, limit: int = 10) -> list[Mapping[str, Any]]:
+def recent_analyses(
+    conn: Database,
+    ticker: str | None = None,
+    limit: int = 10,
+    *,
+    account_id: int = LOCAL_ACCOUNT_ID,
+) -> list[Mapping[str, Any]]:
     if ticker:
         rows = conn.execute(
-            "SELECT * FROM analyses WHERE ticker = ? ORDER BY created_at DESC LIMIT ?",
-            (ticker.upper(), limit),
+            "SELECT * FROM analyses WHERE ticker = ? AND account_id = ? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (ticker.upper(), account_id, limit),
         )
     else:
-        rows = conn.execute("SELECT * FROM analyses ORDER BY created_at DESC LIMIT ?", (limit,))
+        rows = conn.execute(
+            "SELECT * FROM analyses WHERE account_id = ? ORDER BY created_at DESC LIMIT ?",
+            (account_id, limit),
+        )
     return [dict(row) for row in rows]

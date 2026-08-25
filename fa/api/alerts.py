@@ -18,7 +18,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from fa.alerts import authoring, kinds
+from fa.api.auth import SUPABASE, Principal, account_id, current_principal, mode_for
 from fa.api.deps import get_db
+from fa.config import load_settings
 from fa.errors import ValidationError
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
@@ -63,6 +65,34 @@ def _as_dict(alert) -> dict[str, Any]:
     }
 
 
+@router.get("/session")
+def session(principal: Principal = Depends(current_principal)) -> dict[str, Any]:
+    """Who the caller is, and how the server decided that.
+
+    The client calls this on start-up: it is how the app knows whether to show
+    a login screen at all, without hardcoding the deployment mode.
+    """
+    return {
+        "mode": principal.mode,
+        "account_id": principal.account_id,
+        "email": principal.email,
+        "anonymous": principal.is_anonymous,
+    }
+
+
+@router.get("/auth-mode")
+def auth_mode() -> dict[str, Any]:
+    """What credential this deployment wants. Deliberately unauthenticated:
+    a login screen has to know what to ask for before it can ask for it."""
+    settings = load_settings()
+    mode = mode_for(settings)
+    return {
+        "mode": mode,
+        "supabase_url": settings.supabase_url if mode == SUPABASE else "",
+        "supabase_anon_key": settings.supabase_anon_key if mode == SUPABASE else "",
+    }
+
+
 @router.get("/alert-kinds")
 def alert_kinds() -> list[dict[str, Any]]:
     """The catalogue, so the form can be built from it rather than hardcoded.
@@ -100,7 +130,10 @@ def _choices(key: str) -> Mapping[str, list[str]]:
 
 @router.post("/tickers/{ticker}/alerts", status_code=201)
 def create_alert(
-    ticker: str, body: AlertRequest, db: Database = Depends(get_db)
+    ticker: str,
+    body: AlertRequest,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     try:
         alert = authoring.create_alert(
@@ -113,6 +146,7 @@ def create_alert(
             one_shot=body.one_shot,
             expires_at=body.expires_at,
             note=body.note,
+            account_id=account,
         )
     except ValidationError as exc:
         # The user asked for something the catalogue refuses; that is a bad
@@ -124,25 +158,36 @@ def create_alert(
 
 @router.patch("/alerts/{alert_id}")
 def set_alert_active(
-    alert_id: int, body: AlertPatch, db: Database = Depends(get_db)
+    alert_id: int,
+    body: AlertPatch,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     """Silence an alert without losing it or its history."""
-    if not alerts_store.set_active(db, alert_id, body.active):
+    if not alerts_store.set_active(db, alert_id, body.active, account_id=account):
         raise HTTPException(status_code=404, detail=f"No existe la alerta {alert_id}.")
-    alert = alerts_store.get_alert(db, alert_id)
+    alert = alerts_store.get_alert(db, alert_id, account_id=account)
     return _as_dict(alert)
 
 
 @router.delete("/alerts/{alert_id}", status_code=204)
-def delete_alert(alert_id: int, db: Database = Depends(get_db)) -> None:
+def delete_alert(
+    alert_id: int,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> None:
     """Soft delete: the rule stops running, everything it fired stays queryable."""
-    if not alerts_store.delete_alert(db, alert_id):
+    if not alerts_store.delete_alert(db, alert_id, account_id=account):
         raise HTTPException(status_code=404, detail=f"No existe la alerta {alert_id}.")
 
 
 @router.post("/events/{event_id}/ack")
-def acknowledge_event(event_id: int, db: Database = Depends(get_db)) -> dict[str, Any]:
-    if not events_store.acknowledge(db, event_id):
+def acknowledge_event(
+    event_id: int,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    if not events_store.acknowledge(db, event_id, account_id=account):
         raise HTTPException(
             status_code=404, detail=f"No existe el aviso {event_id}, o ya estaba visto."
         )
@@ -150,5 +195,7 @@ def acknowledge_event(event_id: int, db: Database = Depends(get_db)) -> dict[str
 
 
 @router.post("/events/ack")
-def acknowledge_all(db: Database = Depends(get_db)) -> dict[str, int]:
-    return {"acknowledged": events_store.acknowledge_all(db)}
+def acknowledge_all(
+    db: Database = Depends(get_db), account: int = Depends(account_id)
+) -> dict[str, int]:
+    return {"acknowledged": events_store.acknowledge_all(db, account_id=account)}

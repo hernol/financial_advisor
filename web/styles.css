@@ -754,3 +754,50 @@ select:hover { border-color: var(--border); }
 }
 
 .toast.ok { border-color: var(--accent); color: var(--accent); }
+
+/* --- login gate ----------------------------------------------------------- */
+/* Shown before anything else when the deployment asks for a credential. The
+   app behind it is never rendered with empty data first: a dashboard that
+   flashes zeros and then asks who you are looks broken. */
+
+.gate {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: var(--s4);
+  background: var(--bg);
+}
+
+.gate-card {
+  width: 100%;
+  max-width: 22rem;
+  display: grid;
+  gap: var(--s3);
+  justify-items: center;
+  text-align: center;
+}
+.gate-mark { width: 56px; height: 56px; color: var(--accent); }
+.gate-card h1 { margin: 0; font-size: 1.3rem; font-weight: 600; letter-spacing: -.01em; }
+.gate-lead { margin: 0; font-size: .88rem; color: var(--fg-muted); }
+.gate-card form { width: 100%; display: grid; gap: var(--s3); margin-top: var(--s2); }
+.gate-card .sheet-error { margin: 0; }
+#gate-fields { display: grid; gap: var(--s3); }
+
+.logout {
+  position: fixed;
+  right: var(--s4);
+  bottom: calc(76px + var(--safe-b));
+  z-index: 9;
+  min-height: 34px;
+  padding: 0 var(--s3);
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r2);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: .74rem;
+  cursor: pointer;
+}
+.logout:hover { color: var(--fg-muted); border-color: var(--border); }

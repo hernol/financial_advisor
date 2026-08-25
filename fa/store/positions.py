@@ -12,16 +12,20 @@ from fa import models
 from fa.models import Position, Transaction
 from fa.store import transactions as transactions_store
 from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
 from fa.store.serde import row_to_position, to_iso
 
 
-def add_position(conn: Database, position: Position) -> Position:
+def add_position(
+    conn: Database, position: Position, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Position:
     """Store the position and open its ledger with the matching buy."""
     now = datetime.now(timezone.utc)
     new_id = conn.insert(
-        "INSERT INTO positions(ticker, quantity, buy_price, buy_date, currency, notes, "
-        "created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO positions(account_id, ticker, quantity, buy_price, buy_date, currency, "
+        "notes, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
+            account_id,
             position.ticker.upper(),
             position.quantity,
             position.buy_price,
@@ -46,28 +50,42 @@ def add_position(conn: Database, position: Position) -> Position:
             currency=stored.currency,
             note=stored.notes,
         ),
+        account_id=account_id,
     )
     return stored
 
 
-def list_positions(conn: Database, *, include_closed: bool = False) -> list[Position]:
-    sql = "SELECT * FROM positions WHERE deleted_at IS NULL"
+def list_positions(
+    conn: Database, *, include_closed: bool = False, account_id: int = LOCAL_ACCOUNT_ID
+) -> list[Position]:
+    sql = "SELECT * FROM positions WHERE deleted_at IS NULL AND account_id = ?"
     if not include_closed:
         sql += " AND closed_at IS NULL"
     sql += " ORDER BY ticker, buy_date"
-    return [row_to_position(row) for row in conn.execute(sql)]
+    return [row_to_position(row) for row in conn.execute(sql, (account_id,))]
 
 
-def get_position(conn: Database, position_id: int) -> Position | None:
-    row = conn.execute("SELECT * FROM positions WHERE id = ?", (position_id,)).fetchone()
+def get_position(
+    conn: Database, position_id: int, *, account_id: int | None = LOCAL_ACCOUNT_ID
+) -> Position | None:
+    """One position. ``account_id=None`` skips the scope check, for internal
+    lookups that already know the row belongs to the caller."""
+    sql = "SELECT * FROM positions WHERE id = ?"
+    params: list[object] = [position_id]
+    if account_id is not None:
+        sql += " AND account_id = ?"
+        params.append(account_id)
+    row = conn.execute(sql, params).fetchone()
     return row_to_position(row) if row else None
 
 
-def positions_for_ticker(conn: Database, ticker: str) -> list[Position]:
+def positions_for_ticker(
+    conn: Database, ticker: str, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> list[Position]:
     rows = conn.execute(
-        "SELECT * FROM positions WHERE ticker = ? AND closed_at IS NULL AND deleted_at IS NULL "
-        "ORDER BY buy_date",
-        (ticker.upper(),),
+        "SELECT * FROM positions WHERE ticker = ? AND account_id = ? "
+        "AND closed_at IS NULL AND deleted_at IS NULL ORDER BY buy_date",
+        (ticker.upper(), account_id),
     )
     return [row_to_position(row) for row in rows]
 
@@ -176,10 +194,13 @@ def update_buy_price(
     return cur.rowcount > 0
 
 
-def tracked_tickers(conn: Database) -> list[str]:
-    """Every ticker with an open position or an active alert."""
+def tracked_tickers(conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID) -> list[str]:
+    """Every ticker with an open position or an active alert, for one account."""
     rows = conn.execute(
-        "SELECT ticker FROM positions WHERE closed_at IS NULL AND deleted_at IS NULL "
-        "UNION SELECT ticker FROM alerts WHERE active = 1 AND deleted_at IS NULL ORDER BY ticker"
+        "SELECT ticker FROM positions "
+        "WHERE closed_at IS NULL AND deleted_at IS NULL AND account_id = ? "
+        "UNION SELECT ticker FROM alerts "
+        "WHERE active = 1 AND deleted_at IS NULL AND account_id = ? ORDER BY ticker",
+        (account_id, account_id),
     )
     return [row["ticker"] for row in rows]

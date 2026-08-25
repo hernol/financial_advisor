@@ -14,6 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from fa.api.auth import account_id
 from fa.api.deps import get_db
 from fa.indicators import sma_series
 from fa.store import alerts as alerts_store
@@ -44,18 +45,20 @@ SERIES = {
 }
 
 
-def _tracked(db: Database) -> list[str]:
-    return positions_store.tracked_tickers(db)
+def _tracked(db: Database, account: int) -> list[str]:
+    return positions_store.tracked_tickers(db, account_id=account)
 
 
 @router.get("/tickers")
-def list_tickers(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
+def list_tickers(db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> list[dict[str, Any]]:
     """Everything being followed, with just enough to render a list row."""
     out: list[dict[str, Any]] = []
-    for ticker in _tracked(db):
+    for ticker in _tracked(db, account):
         coverage = history_store.bar_coverage(db, ticker)
         latest = history_store.latest_indicators(db, ticker)
-        active = alerts_store.list_alerts(db, ticker=ticker, only_active=True)
+        active = alerts_store.list_alerts(db, ticker=ticker, only_active=True, account_id=account)
         out.append(
             {
                 "ticker": ticker,
@@ -67,14 +70,16 @@ def list_tickers(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
                 "rsi": latest["rsi"] if latest else None,
                 "taken_at": latest["taken_at"] if latest else None,
                 "active_alerts": len(active),
-                "positions": len(positions_store.positions_for_ticker(db, ticker)),
+                "positions": len(positions_store.positions_for_ticker(db, ticker, account_id=account)),
             }
         )
     return out
 
 
 @router.get("/tickers/{ticker}")
-def ticker_detail(ticker: str, db: Database = Depends(get_db)) -> dict[str, Any]:
+def ticker_detail(ticker: str, db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
     """The numbers panel: last reading of every indicator, plus its age."""
     symbol = ticker.upper()
     coverage = history_store.bar_coverage(db, symbol)
@@ -88,7 +93,7 @@ def ticker_detail(ticker: str, db: Database = Depends(get_db)) -> dict[str, Any]
         )
     latest = history_store.latest_indicators(db, symbol)
     payload = dict(latest["payload"]) if latest else {}
-    positions = positions_store.positions_for_ticker(db, symbol)
+    positions = positions_store.positions_for_ticker(db, symbol, account_id=account)
     price = latest["price"] if latest else None
     change_abs, change_pct = _session_change(db, symbol, price)
     return {
@@ -137,6 +142,7 @@ def ticker_bars(
     ticker: str,
     days: int = Query(365, ge=5, le=3650),
     db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     """Daily bars plus the two moving averages, shaped for the chart.
 
@@ -188,6 +194,7 @@ def ticker_indicator_series(
     name: str = Query("rsi"),
     limit: int = Query(500, ge=10, le=5000),
     db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> dict[str, Any]:
     """One indicator through time — the history nothing used to keep."""
     if name not in SERIES:
@@ -203,12 +210,14 @@ def ticker_indicator_series(
 
 
 @router.get("/tickers/{ticker}/alerts")
-def ticker_alerts(ticker: str, db: Database = Depends(get_db)) -> list[dict[str, Any]]:
+def ticker_alerts(ticker: str, db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> list[dict[str, Any]]:
     """Active and inactive alerts, each with how it last came out."""
     symbol = ticker.upper()
     out: list[dict[str, Any]] = []
-    for alert in alerts_store.list_alerts(db, ticker=symbol):
-        evaluations = runs_store.evaluations_for(db, alert.id, limit=1) if alert.id else []
+    for alert in alerts_store.list_alerts(db, ticker=symbol, account_id=account):
+        evaluations = runs_store.evaluations_for(db, alert.id, limit=1, account_id=account) if alert.id else []
         last = evaluations[-1] if evaluations else None
         out.append(
             {
@@ -233,13 +242,14 @@ def ticker_events(
     ticker: str,
     limit: int = Query(20, ge=1, le=200),
     db: Database = Depends(get_db),
+    account: int = Depends(account_id),
 ) -> list[dict[str, Any]]:
     """What actually fired for this ticker, newest first."""
     symbol = ticker.upper()
     rows = db.execute(
-        "SELECT * FROM alert_events WHERE ticker = ? AND deleted_at IS NULL "
-        "ORDER BY fired_at DESC LIMIT ?",
-        (symbol, limit),
+        "SELECT * FROM alert_events WHERE ticker = ? AND account_id = ? "
+        "AND deleted_at IS NULL ORDER BY fired_at DESC LIMIT ?",
+        (symbol, account, limit),
     )
     from fa.store.serde import load_json
 
@@ -260,12 +270,14 @@ def ticker_events(
 
 
 @router.get("/health")
-def health(db: Database = Depends(get_db)) -> dict[str, Any]:
+def health(db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
     """Is the scheduler alive? The question the CLI could never answer."""
     from fa.store import migrations
 
-    state = dict(runs_store.health(db))
-    tracked = _tracked(db)
+    state = dict(runs_store.health(db, account_id=account))
+    tracked = _tracked(db, account)
     state.update(
         {
             "engine": db.dialect.name,

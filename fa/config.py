@@ -61,6 +61,10 @@ class Settings:
     db_path: Path
     log_path: Path
     database_url: str = ""
+    api_token: str = ""
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    supabase_jwt_secret: str = ""
 
     @property
     def database_target(self) -> "Path | str":
@@ -90,6 +94,7 @@ def load_settings() -> Settings:
     db_path = Path(os.environ.get("FA_DB_PATH", DB_PATH))
     log_path = Path(os.environ.get("FA_LOG_PATH", LOG_PATH))
     database_url = os.environ.get("DATABASE_URL", "").strip()
+    api_token = os.environ.get("FA_API_TOKEN", "").strip()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     return Settings(
@@ -111,4 +116,8 @@ def load_settings() -> Settings:
         db_path=db_path,
         log_path=log_path,
         database_url=database_url,
+        api_token=api_token,
+        supabase_url=os.environ.get("SUPABASE_URL", "").strip().rstrip("/"),
+        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", "").strip(),
+        supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", "").strip(),
     )
