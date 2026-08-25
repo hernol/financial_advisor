@@ -29,6 +29,23 @@ DEFAULT_BENCHMARK = "SPY"
 BASE_CURRENCY = "USD"
 
 
+def _text(name: str, default: str = "") -> str:
+    """An environment variable, treating empty as unset.
+
+    ``os.environ.get(name, default)`` only falls back when the variable is
+    absent, and a container passes ``VAR=`` for anything the operator left
+    blank — so an unset value arrived as "" and silently beat the default. That
+    is how the dashboard ended up asking Gemini for an empty model name.
+    """
+    value = os.environ.get(name)
+    return value.strip() if value and value.strip() else default
+
+
+def _optional(name: str) -> str | None:
+    """Same, for settings whose absence is meaningful."""
+    return _text(name) or None
+
+
 def _flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
     if raw is None:
@@ -98,33 +115,33 @@ class Settings:
 
 def load_settings() -> Settings:
     """Build settings from the environment."""
-    db_path = Path(os.environ.get("FA_DB_PATH", DB_PATH))
-    log_path = Path(os.environ.get("FA_LOG_PATH", LOG_PATH))
-    database_url = os.environ.get("DATABASE_URL", "").strip()
-    api_token = os.environ.get("FA_API_TOKEN", "").strip()
+    db_path = Path(_text("FA_DB_PATH", str(DB_PATH)))
+    log_path = Path(_text("FA_LOG_PATH", str(LOG_PATH)))
+    database_url = _text("DATABASE_URL")
+    api_token = _text("FA_API_TOKEN")
     db_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     return Settings(
-        gemini_api_key=os.environ.get("GEMINI_API_KEY"),
-        gemini_model=os.environ.get("FA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-        alpha_vantage_key=os.environ.get("ALPHA_VANTAGE_API_KEY"),
-        finnhub_key=os.environ.get("FINNHUB_API_KEY"),
-        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN"),
-        telegram_chat_id=os.environ.get("TELEGRAM_CHAT_ID"),
+        gemini_api_key=_optional("GEMINI_API_KEY"),
+        gemini_model=_text("FA_GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+        alpha_vantage_key=_optional("ALPHA_VANTAGE_API_KEY"),
+        finnhub_key=_optional("FINNHUB_API_KEY"),
+        telegram_bot_token=_optional("TELEGRAM_BOT_TOKEN"),
+        telegram_chat_id=_optional("TELEGRAM_CHAT_ID"),
         desktop_notifications=_flag("FA_DESKTOP_NOTIFICATIONS", default=True),
         default_cooldown_hours=_int("FA_COOLDOWN_HOURS", DEFAULT_COOLDOWN_HOURS),
         earnings_warning_days=_int("FA_EARNINGS_WARNING_DAYS", DEFAULT_EARNINGS_WARNING_DAYS),
-        local_ai_url=os.environ.get("FA_LOCAL_AI_URL", DEFAULT_LOCAL_AI_URL).rstrip("/"),
-        local_ai_model=os.environ.get("FA_LOCAL_AI_MODEL"),
-        local_ai_api_key=os.environ.get("FA_LOCAL_AI_API_KEY", "not-needed"),
+        local_ai_url=_text("FA_LOCAL_AI_URL", DEFAULT_LOCAL_AI_URL).rstrip("/"),
+        local_ai_model=_optional("FA_LOCAL_AI_MODEL"),
+        local_ai_api_key=_text("FA_LOCAL_AI_API_KEY", "not-needed"),
         local_ai_timeout=_int("FA_LOCAL_AI_TIMEOUT", DEFAULT_LOCAL_AI_TIMEOUT),
         local_ai_max_tokens=_int("FA_LOCAL_AI_MAX_TOKENS", DEFAULT_LOCAL_AI_MAX_TOKENS),
-        benchmark=os.environ.get("FA_BENCHMARK", DEFAULT_BENCHMARK).upper(),
+        benchmark=_text("FA_BENCHMARK", DEFAULT_BENCHMARK).upper(),
         db_path=db_path,
         log_path=log_path,
         database_url=database_url,
         api_token=api_token,
-        supabase_url=os.environ.get("SUPABASE_URL", "").strip().rstrip("/"),
-        supabase_anon_key=os.environ.get("SUPABASE_ANON_KEY", "").strip(),
-        supabase_jwt_secret=os.environ.get("SUPABASE_JWT_SECRET", "").strip(),
+        supabase_url=_text("SUPABASE_URL").rstrip("/"),
+        supabase_anon_key=_text("SUPABASE_ANON_KEY"),
+        supabase_jwt_secret=_text("SUPABASE_JWT_SECRET"),
     )

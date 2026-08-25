@@ -1,28 +1,52 @@
+# Every service gets the same environment.
+#
+# This used to be three hand-maintained lists, each a different subset of the
+# variables, and the dashboard's was missing GEMINI_API_KEY — so asking for an
+# AI report from the phone failed with "falta la key" on a machine that had it.
+# One definition, merged everywhere: adding a variable is one edit, and no
+# service can quietly be short one.
+x-app-env: &app-env
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  FA_GEMINI_MODEL: ${FA_GEMINI_MODEL:-}
+  ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+  FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+  TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+  FA_COOLDOWN_HOURS: ${FA_COOLDOWN_HOURS:-24}
+  FA_EARNINGS_WARNING_DAYS: ${FA_EARNINGS_WARNING_DAYS:-7}
+  FA_BENCHMARK: ${FA_BENCHMARK:-SPY}
+  # notify-send has no DBUS inside a container; the default is off everywhere
+  # and the host CLI is the one that turns it on.
+  FA_DESKTOP_NOTIFICATIONS: ${FA_DESKTOP_NOTIFICATIONS:-false}
+  # host.docker.internal lets the container reach llama-server on the host
+  FA_LOCAL_AI_URL: ${FA_LOCAL_AI_URL:-http://host.docker.internal:5001/v1}
+  FA_LOCAL_AI_MODEL: ${FA_LOCAL_AI_MODEL:-}
+  FA_LOCAL_AI_MAX_TOKENS: ${FA_LOCAL_AI_MAX_TOKENS:-2000}
+  FA_LOCAL_AI_TIMEOUT: ${FA_LOCAL_AI_TIMEOUT:-240}
+  # Empty means the SQLite file in ./data.
+  DATABASE_URL: ${DATABASE_URL:-}
+  # Only the dashboard reads these, but keeping them here means the list stays
+  # one list.
+  FA_API_TOKEN: ${FA_API_TOKEN:-}
+  SUPABASE_URL: ${SUPABASE_URL:-}
+  SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-}
+  SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
+
+x-host-user: &host-user
+  # Run as the host user: otherwise the SQLite file in ./data ends up owned by
+  # root and the CLI outside Docker can no longer write it.
+  user: "${UID:-1000}:${GID:-1000}"
+
 services:
   analyzer:
+    <<: *host-user
     build: .
     image: financial_analyzer:latest
     container_name: financial_analyzer_app
-    # Run as the host user: otherwise the SQLite file in ./data ends up owned by
-    # root and the CLI outside Docker can no longer write it.
-    user: "${UID:-1000}:${GID:-1000}"
     # Mandatory for console interactivity (input fields)
     stdin_open: true
     tty: true
-    environment:
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - FA_DESKTOP_NOTIFICATIONS=${FA_DESKTOP_NOTIFICATIONS:-false}
-      - FA_COOLDOWN_HOURS=${FA_COOLDOWN_HOURS:-24}
-      - FA_EARNINGS_WARNING_DAYS=${FA_EARNINGS_WARNING_DAYS:-7}
-      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
-      # host.docker.internal lets the container reach llama-server on the host
-      - FA_LOCAL_AI_URL=${FA_LOCAL_AI_URL:-http://host.docker.internal:5001/v1}
-      - FA_LOCAL_AI_MODEL=${FA_LOCAL_AI_MODEL:-}
-      - FA_LOCAL_AI_MAX_TOKENS=${FA_LOCAL_AI_MAX_TOKENS:-2000}
+    environment: *app-env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -37,21 +61,17 @@ services:
   # "8000:8000" — the port mapping is what decides who can get in, not the
   # address the process binds inside the container.
   dashboard:
+    <<: *host-user
     build: .
     image: financial_analyzer:latest
     container_name: financial_analyzer_web
-    user: "${UID:-1000}:${GID:-1000}"
     command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
-      - FA_API_TOKEN=${FA_API_TOKEN:-}
-      - SUPABASE_URL=${SUPABASE_URL:-}
-      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-}
-      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
-      - DATABASE_URL=${DATABASE_URL:-}
-      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
       # The client is static files; mounting it means an edit shows up on
@@ -62,19 +82,14 @@ services:
   # scripts/setup-systemd.sh). --trigger labels the row it writes to
   # check_runs, so a scheduled run is distinguishable from a manual one.
   alerts:
+    <<: *host-user
     build: .
     image: financial_analyzer:latest
     profiles: ["cron"]
-    user: "${UID:-1000}:${GID:-1000}"
     command: ["check-alerts", "--trigger", "timer"]
-    environment:
-      - ALPHA_VANTAGE_API_KEY=${ALPHA_VANTAGE_API_KEY:-}
-      - FINNHUB_API_KEY=${FINNHUB_API_KEY:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
-      - FA_DESKTOP_NOTIFICATIONS=false
-      - FA_COOLDOWN_HOURS=${FA_COOLDOWN_HOURS:-24}
-      - FA_BENCHMARK=${FA_BENCHMARK:-SPY}
+    environment: *app-env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
 
@@ -85,9 +100,9 @@ services:
     image: postgres:17-alpine
     profiles: ["dev"]
     environment:
-      - POSTGRES_USER=fa
-      - POSTGRES_PASSWORD=fa
-      - POSTGRES_DB=fa_test
+      POSTGRES_USER: fa
+      POSTGRES_PASSWORD: fa
+      POSTGRES_DB: fa_test
     ports:
       - "55432:5432"
     healthcheck:
