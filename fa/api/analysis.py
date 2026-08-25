@@ -102,6 +102,7 @@ def _run(db: Database, account: int, ticker: str, context: str) -> None:
             ticker,
             context,
             account_id=account,
+            on_stage=lambda stage: _set_job(account, ticker, stage=stage),
         )
     except FinancialAnalyzerError as exc:
         # The domain errors already say what is missing — a key, a provider, a
@@ -115,6 +116,7 @@ def _run(db: Database, account: int, ticker: str, context: str) -> None:
     _set_job(
         account,
         ticker,
+        stage="",
         status=DONE,
         detail="",
         analysis_id=report.analysis_id,
@@ -141,7 +143,10 @@ def request_analysis(
     if job_state(account, symbol).get("status") == RUNNING:
         raise HTTPException(status_code=409, detail=f"Ya hay un informe de {symbol} en curso.")
 
-    _set_job(account, symbol, status=RUNNING, detail="", analysis_id=None)
+    _set_job(
+        account, symbol, status=RUNNING, detail="", analysis_id=None,
+        stage=reporting.FETCHING, started=datetime.now(timezone.utc).isoformat(),
+    )
     background.add_task(_run, db, account, symbol, body.context)
     return {"ticker": symbol, "status": RUNNING}
 

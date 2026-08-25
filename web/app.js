@@ -1183,12 +1183,20 @@ async function awaitFundamentals(attempts = 12) {
 const PRIORITY_LABEL = { high: 'alta', medium: 'media', low: 'baja' };
 
 async function loadAI() {
-  const [suggestions, reports] = await Promise.all([
+  const [suggestions, reports, job] = await Promise.all([
     api(`/api/suggestions?ticker=${state.ticker}`),
     api(`/api/tickers/${state.ticker}/analyses`),
+    api(`/api/tickers/${state.ticker}/analysis/status`),
   ]);
   renderSuggestions(suggestions);
   renderReports(reports);
+
+  // Coming back to the tab while a report is still running should show it
+  // running, not an idle screen that looks like nothing happened.
+  if (job.status === 'running' && !workingTimer) {
+    startWorking(job.stage || 'Pensando…');
+    watchReport().catch(() => {});
+  }
 }
 
 function renderSuggestions(rows) {
@@ -1295,42 +1303,89 @@ function renderReportBody(text) {
     .replace(/^\s*---+\s*$/gm, '<span class="md-hr"></span>');
 }
 
-async function askForReport() {
-  const button = $('ask-ai');
-  button.disabled = true;
-  $('ai-status').textContent = 'Pidiendo el informe… puede tardar un minuto.';
-  try {
-    await send(`/api/tickers/${state.ticker}/analysis`, 'POST', { context: '' });
-    await watchReport();
-  } catch (e) {
-    $('ai-status').textContent = '';
-    showError(e.message);
-  } finally {
-    button.disabled = false;
-  }
+function openReportForm() {
+  // Same offer the terminal makes: paste what your broker's app says and the
+  // model gets it as claims to check against the real numbers, not as fact.
+  const context = field('context', 'Texto de tu app de inversión', {
+    type: 'textarea',
+    hint: 'Opcional. Lo que pegues entra al informe como afirmaciones sin '
+      + 'verificar, para que el modelo las contraste con los datos duros.',
+  });
+  sheet.open(`Informe de ${state.ticker}`, [context], async () => {
+    const values = formValues();
+    await send(`/api/tickers/${state.ticker}/analysis`, 'POST', { context: values.context });
+    sheet.close();
+    pickTab('ai');
+    startWorking('Pidiendo el informe…');
+    watchReport().catch(() => {});
+  });
 }
 
-async function watchReport(attempts = 40) {
+let workingTimer = null;
+let workingReveal = null;
+
+// With the data already cached a report can come back in about a second, and a
+// spinner that appears and vanishes in that time reads as a glitch. Below this
+// the work is simply instant and nothing needs to be said about it.
+const REVEAL_AFTER = 400;
+
+/** Show the busy card and start counting. */
+function startWorking(stage) {
+  const since = Date.now();
+  $('ai-stage').textContent = stage;
+  $('ai-elapsed').textContent = '0 s';
+  $('ai-status').textContent = '';
+
+  clearTimeout(workingReveal);
+  workingReveal = setTimeout(() => { $('ai-working').hidden = false; }, REVEAL_AFTER);
+
+  clearInterval(workingTimer);
+  workingTimer = setInterval(() => {
+    const seconds = Math.round((Date.now() - since) / 1000);
+    $('ai-elapsed').textContent = seconds < 60
+      ? `${seconds} s`
+      : `${Math.floor(seconds / 60)} min ${String(seconds % 60).padStart(2, '0')} s`;
+  }, 1000);
+}
+
+function stopWorking() {
+  clearTimeout(workingReveal);
+  clearInterval(workingTimer);
+  workingReveal = null;
+  workingTimer = null;
+  $('ai-working').hidden = true;
+}
+
+async function watchReport(attempts = 90) {
   for (let i = 0; i < attempts; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-    let state_;
+    // Poll quickly at first so a cached report is noticed before the card is
+    // even shown, then settle into a rhythm that does not hammer the API.
+    await new Promise((resolve) => setTimeout(resolve, i < 3 ? 500 : 2500));
+    let job;
     try {
-      state_ = await api(`/api/tickers/${state.ticker}/analysis/status`);
+      job = await api(`/api/tickers/${state.ticker}/analysis/status`);
     } catch {
+      stopWorking();
       return;
     }
-    if (state_.status === 'done') {
-      $('ai-status').textContent = state_.suggestions
-        ? `Listo: ${state_.suggestions} sugerencia(s).` : 'Listo. Sin sugerencias nuevas.';
+    // The server says which step it is on, so the wait is explained rather
+    // than merely animated.
+    if (job.stage) $('ai-stage').textContent = job.stage;
+
+    if (job.status === 'done') {
+      stopWorking();
+      $('ai-status').textContent = job.suggestions
+        ? `Listo: ${job.suggestions} sugerencia(s).` : 'Listo. Sin sugerencias nuevas.';
       await loadAI();
       return;
     }
-    if (state_.status === 'error') {
-      $('ai-status').textContent = '';
-      showError(state_.detail || 'El informe falló.');
+    if (job.status === 'error') {
+      stopWorking();
+      showError(job.detail || 'El informe falló.');
       return;
     }
   }
+  stopWorking();
   $('ai-status').textContent = 'Sigue corriendo. Volvé a esta pestaña en un rato.';
 }
 
@@ -1428,7 +1483,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   $('add-tx').addEventListener('click', () => openTransactionForm());
-  $('ask-ai').addEventListener('click', askForReport);
+  $('ask-ai').addEventListener('click', openReportForm);
   $('check-now').addEventListener('click', checkNow);
   $('add-alert').addEventListener('click', () => {
     openAlertForm(state.ticker).catch((e) => showError(e.message));

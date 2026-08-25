@@ -1,12 +1,18 @@
 """Database access for the API process.
 
-One connection is opened at startup and shared, guarded by a lock. The API only
-reads, and a local install has one user, so a pool would be ceremony; the lock
-is what makes it safe for the worker threads uvicorn runs sync endpoints on.
+One connection is opened at startup and shared. Both drivers serialise access
+to a connection themselves — ``sqlite3.threadsafety`` is 3 and psycopg declares
+level 2 — so the worker threads uvicorn runs sync endpoints on can share it.
 
-When this grows to the hosted mode the lock becomes a real pool — which is why
-every endpoint asks for the database through :func:`get_db` rather than reaching
-for a module level global.
+The lock guards opening and closing, and nothing else. It used to be held for
+the whole of every request, which serialised the entire API behind one caller
+and, because FastAPI finalises ``yield`` dependencies *after* background tasks
+run, froze every endpoint for as long as an AI report took: forty seconds during
+which the page could not even ask whether the report was done.
+
+When this grows to the hosted mode the shared connection becomes a real pool —
+which is why every endpoint asks through :func:`get_db` rather than reaching for
+the module level global.
 """
 from __future__ import annotations
 
@@ -57,10 +63,13 @@ def set_database(database: Database | None) -> None:
 
 
 def get_db() -> Iterator[Database]:
-    """FastAPI dependency: the shared database, serialised across threads."""
-    database = _database or open_database()
-    with _lock:
-        yield database
+    """FastAPI dependency: the shared database.
+
+    Deliberately does not hold ``_lock``. The driver serialises statements, and
+    holding a lock across the request would put every caller in a queue behind
+    the slowest one.
+    """
+    yield _database or open_database()
 
 
 _market_factory: Any = None

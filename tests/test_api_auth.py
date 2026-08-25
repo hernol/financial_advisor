@@ -347,3 +347,39 @@ def test_a_new_alert_lands_in_the_callers_account(two_accounts, client, conn):
     stored = alerts_store.get_alert(conn, body["id"], account_id=account)
     assert stored is not None
     assert alerts_store.get_alert(conn, body["id"], account_id=LOCAL_ACCOUNT_ID) is None
+
+
+# --- concurrency ------------------------------------------------------------
+
+
+def test_a_request_does_not_hold_the_database_lock():
+    """It used to, for the whole request — and because FastAPI finalises yield
+    dependencies after background tasks, that meant every endpoint froze for as
+    long as an AI report took. Forty seconds during which the page could not
+    even ask whether the report had finished."""
+    import threading
+
+    from fa.api import deps
+
+    generator = deps.get_db()
+    next(generator)  # the dependency is now "inside" a request
+    acquired = deps._lock.acquire(blocking=False)
+    if acquired:
+        deps._lock.release()
+    generator.close()
+    assert acquired, "get_db held the lock across the request"
+
+    # And it is still acquirable from another thread, which is where uvicorn
+    # runs sync endpoints.
+    result = []
+    generator = deps.get_db()
+    next(generator)
+    thread = threading.Thread(
+        target=lambda: result.append(deps._lock.acquire(timeout=1))
+    )
+    thread.start()
+    thread.join()
+    if result and result[0]:
+        deps._lock.release()
+    generator.close()
+    assert result == [True]

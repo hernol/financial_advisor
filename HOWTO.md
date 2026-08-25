@@ -539,9 +539,16 @@ moneda también se rechaza, con el mismo motivo.
 Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**
 (compra, venta, dividendo, split, comisión) y **marcar avisos como vistos**.
 
-Desde la pestaña **IA** se pide el informe a Gemini. Tarda entre medio minuto y un minuto,
-así que corre en segundo plano y la pantalla avisa cuando está. Lo que devuelve queda
-guardado: los informes viejos se leen sin volver a pedirlos.
+Desde la pestaña **IA** se pide el informe a Gemini. Antes de pedirlo podés **pegar el texto
+de tu app de inversión** —lo mismo que ofrece la terminal—: entra al informe como
+afirmaciones sin verificar, para que el modelo las contraste con los datos duros en vez de
+darlas por ciertas.
+
+Tarda entre unos segundos y un minuto según qué haya cacheado, así que corre en segundo
+plano y la pantalla dice **en qué paso va**: trayendo precios y estados contables, leyendo lo
+que pegaste, consultando al modelo. Con un contador al lado, para que la espera tenga forma.
+
+Lo que devuelve queda guardado: los informes viejos se leen sin volver a pedirlos.
 
 Las **sugerencias** que propone se aceptan con un botón y se vuelven alertas de verdad. Las
 que no son automatizables —"tomar ganancias parciales", "mirar el balance del 10/09"— se

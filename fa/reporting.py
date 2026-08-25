@@ -7,7 +7,7 @@ both front ends call the same thing.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from fa import ai
 from fa.ai_context import DataPack, build_data_pack
@@ -23,6 +23,19 @@ from fa.store import suggestions as suggestions_store
 from fa.store.database import Database
 from fa.store.schema import LOCAL_ACCOUNT_ID
 
+# A report takes tens of seconds across a few distinct steps. Reporting which
+# one it is on costs nothing and turns an unexplained wait into a legible one.
+StageCallback = Callable[[str], None]
+
+FETCHING = "Trayendo precios y estados contables"
+READING = "Leyendo el texto que pegaste"
+ASKING = "Consultando al modelo"
+SAVING = "Guardando el informe"
+
+
+def _noop(_stage: str) -> None:
+    return None
+
 
 def build_pack(
     conn: Database,
@@ -32,12 +45,17 @@ def build_pack(
     external_context: str = "",
     *,
     account_id: int = LOCAL_ACCOUNT_ID,
+    on_stage: StageCallback = _noop,
 ) -> DataPack:
     """Assemble the grounded payload: live prices, fundamentals, exposure, gaps."""
+    on_stage(FETCHING)
     positions = positions_store.positions_for_ticker(conn, ticker, account_id=account_id)
     oldest = min((p.buy_date for p in positions), default=None)
     annual, quarterly, fundamentals, context = market.analysis_tables(ticker, since=oldest)
-    claims = extract_claims(local_ai, external_context) if external_context else None
+    claims = None
+    if external_context:
+        on_stage(READING)
+        claims = extract_claims(local_ai, external_context)
     return build_data_pack(
         context,
         annual,
@@ -58,12 +76,16 @@ def run_report(
     external_context: str = "",
     *,
     account_id: int = LOCAL_ACCOUNT_ID,
+    on_stage: StageCallback = _noop,
 ) -> AIReport:
     """Ground the model on live data, ask for the report, persist it."""
     data_pack = build_pack(
-        conn, market, local_ai, ticker, external_context, account_id=account_id
+        conn, market, local_ai, ticker, external_context,
+        account_id=account_id, on_stage=on_stage,
     )
+    on_stage(ASKING)
     report = ai.analyze(settings, ticker, data_pack, external_context, local_client=local_ai)
+    on_stage(SAVING)
     analysis_id = events_store.save_analysis(
         conn,
         ticker,

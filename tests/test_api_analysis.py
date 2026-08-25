@@ -11,7 +11,7 @@ from datetime import date
 import pytest
 from fastapi.testclient import TestClient
 
-from fa.api import deps
+from fa.api import analysis, deps
 from fa.api.app import create_app
 from fa.models import AIReport, PricePoint, Suggestion
 from fa.store import alerts as alerts_store
@@ -38,7 +38,9 @@ def with_key(monkeypatch, tmp_path):
 
 def stub_report(monkeypatch, conn, *, suggestions=(), fails=None):
     """Replace the report itself; everything around it is what is under test."""
-    def fake(db, market, settings, local_ai, ticker, context="", account_id=1):
+    def fake(db, market, settings, local_ai, ticker, context="", account_id=1, on_stage=None):
+        if on_stage:
+            on_stage("etapa de prueba")
         if fails:
             raise fails
         analysis_id = events_store.save_analysis(
@@ -201,3 +203,111 @@ def test_a_ticker_without_alerts_cannot_be_checked(client):
 def test_a_check_can_be_asked_for(client, conn):
     client.post("/api/tickers/PODD/alerts", json={"kind": "rsi"})
     assert client.post("/api/tickers/PODD/check").status_code == 202
+
+
+# --- what the wait looks like -----------------------------------------------
+
+
+def test_the_job_reports_the_step_it_is_on(client, conn, monkeypatch, with_key):
+    """Tens of seconds of silence is an unexplained wait; the steps are real."""
+    seen = []
+
+    def fake(db, market, settings, local_ai, ticker, context="", account_id=1, on_stage=None):
+        seen.append(on_stage)
+        on_stage("Consultando al modelo")
+        return AIReport(ticker=ticker, text="ok", suggestions=(), model="m", analysis_id=1)
+
+    monkeypatch.setattr("fa.reporting.run_report", fake)
+    client.post("/api/tickers/PODD/analysis", json={})
+    assert seen and seen[0] is not None
+
+
+def test_a_queued_report_starts_at_the_first_step(client, conn, monkeypatch, with_key):
+    from fa import reporting
+
+    holding = {}
+
+    def fake(db, market, settings, local_ai, ticker, context="", account_id=1, on_stage=None):
+        holding["stage"] = analysis.job_state(1, ticker).get("stage")
+        return AIReport(ticker=ticker, text="ok", suggestions=(), model="m", analysis_id=1)
+
+    monkeypatch.setattr("fa.reporting.run_report", fake)
+    client.post("/api/tickers/PODD/analysis", json={})
+    assert holding["stage"] == reporting.FETCHING
+
+
+def test_the_step_is_cleared_when_it_finishes(client, conn, monkeypatch, with_key):
+    stub_report(monkeypatch, conn)
+    client.post("/api/tickers/PODD/analysis", json={})
+    assert client.get("/api/tickers/PODD/analysis/status").json()["stage"] == ""
+
+
+def test_the_pasted_context_reaches_the_report(client, conn, monkeypatch, with_key):
+    """The whole point of the field: it has to arrive, not be dropped."""
+    seen = {}
+
+    def fake(db, market, settings, local_ai, ticker, context="", account_id=1, on_stage=None):
+        seen["context"] = context
+        return AIReport(ticker=ticker, text="ok", suggestions=(), model="m", analysis_id=1)
+
+    monkeypatch.setattr("fa.reporting.run_report", fake)
+    client.post(
+        "/api/tickers/PODD/analysis",
+        json={"context": "El broker dice que el target es 200 USD."},
+    )
+    assert seen["context"] == "El broker dice que el target es 200 USD."
+
+
+def test_reading_the_pasted_text_is_its_own_step(conn):
+    """It only happens when there is something pasted, so it is announced then."""
+    from fa import reporting
+
+    stages: list[str] = []
+
+    class Market:
+        def analysis_tables(self, ticker, since=None):
+            from datetime import datetime, timezone
+
+            import pandas as pd
+
+            from fa.models import Fundamentals, MarketContext, Quote
+
+            quote = Quote(ticker=ticker, price=1.0, currency="USD",
+                          as_of=datetime.now(timezone.utc), source="test")
+            return (pd.DataFrame(), pd.DataFrame(),
+                    Fundamentals(ticker=ticker, annual=(), quarterly=(),
+                                 shares_outstanding=None, source="test"),
+                    MarketContext(ticker=ticker, quote=quote))
+
+    class Local:
+        def available(self):
+            return False
+
+    reporting.build_pack(conn, Market(), Local(), "PODD", "texto pegado",
+                         on_stage=stages.append)
+    assert reporting.FETCHING in stages
+    assert reporting.READING in stages
+
+
+def test_without_pasted_text_that_step_is_skipped(conn):
+    from fa import reporting
+
+    stages: list[str] = []
+
+    class Market:
+        def analysis_tables(self, ticker, since=None):
+            from datetime import datetime, timezone
+
+            import pandas as pd
+
+            from fa.models import Fundamentals, MarketContext, Quote
+
+            quote = Quote(ticker=ticker, price=1.0, currency="USD",
+                          as_of=datetime.now(timezone.utc), source="test")
+            return (pd.DataFrame(), pd.DataFrame(),
+                    Fundamentals(ticker=ticker, annual=(), quarterly=(),
+                                 shares_outstanding=None, source="test"),
+                    MarketContext(ticker=ticker, quote=quote))
+
+    reporting.build_pack(conn, Market(), None, "PODD", "", on_stage=stages.append)
+    assert reporting.READING not in stages
