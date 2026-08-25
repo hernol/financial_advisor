@@ -13,12 +13,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from fa import ledger, models
 from fa.api.auth import account_id
-from fa.api.deps import get_db
+from fa.api.deps import build_market, get_db
 from fa.config import BASE_CURRENCY
 from fa.store import history as history_store
 from fa.store.database import Database
@@ -200,6 +200,7 @@ REQUIRED: dict[str, tuple[str, ...]] = {
 @router.post("/transactions", status_code=201)
 def add_transaction(
     body: TransactionRequest,
+    background: BackgroundTasks,
     db: Database = Depends(get_db),
     account: int = Depends(account_id),
 ) -> dict[str, Any]:
@@ -209,7 +210,9 @@ def add_transaction(
     table: the holding is derived from the entries, so adding one here is the
     whole operation.
     """
+    from fa.store import positions as positions_store
     from fa.store import transactions as transactions_store
+    from fa.warm import has_prices, warm
 
     if body.kind not in models.TRANSACTION_KINDS:
         raise HTTPException(
@@ -256,12 +259,24 @@ def add_transaction(
         ),
         account_id=account,
     )
+    # The rollup is what the CLI and the alert engine read, so it moves with
+    # the ledger regardless of which client wrote the entry.
+    positions_store.sync_from_ledger(db, entry.ticker, account_id=account)
+
+    # A ticker with no stored prices cannot be valued. Telling the user to go
+    # run a command would be asking them to do the program's job, so the fetch
+    # is queued and the screen fills in when it lands.
+    fetching = not has_prices(db, entry.ticker)
+    if fetching:
+        background.add_task(warm, db, build_market(db), entry.ticker)
+
     return {
         "id": entry.id,
         "ticker": entry.ticker,
         "kind": entry.kind,
         "trade_date": entry.trade_date.isoformat(),
         "cash_flow": entry.cash_flow,
+        "fetching_prices": fetching,
     }
 
 
@@ -274,6 +289,7 @@ def remove_transaction(
     """Retire an entry from the rollup without erasing it from the history."""
     from fa.store import transactions as transactions_store
 
+    # soft_delete refreshes the rollup itself, so the two stay in step.
     if not transactions_store.soft_delete(db, transaction_id, account_id=account):
         raise HTTPException(
             status_code=404, detail=f"No existe el movimiento {transaction_id}."

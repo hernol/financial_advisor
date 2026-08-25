@@ -127,7 +127,8 @@ Cartera y Tickers — con gráficos de precio, historial de indicadores, alta y 
 y carga de operaciones.
 
 Lee **sólo lo que ya está guardado**: abrir una pantalla no dispara ninguna descarga, así que
-funciona con el proveedor caído y no cuesta una llamada por visita. El encabezado dice hace
+funciona con el proveedor caído y no cuesta una llamada por visita. Cargar un ticker nuevo sí
+trae su historial, en segundo plano: es una escritura y pasa una vez por papel. El encabezado dice hace
 cuánto corrió el último chequeo, porque un número vale lo que vale la corrida que lo produjo.
 
 **Autenticación**, elegida por configuración:

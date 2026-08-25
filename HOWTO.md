@@ -181,7 +181,11 @@ Eso tiene tres consecuencias prácticas:
 - **Borrar es lógico.** Sacar un movimiento lo quita del cálculo y lo deja registrado.
 
 Desde el dashboard también se cargan movimientos, incluidos dividendos y comisiones, que por
-CLI todavía no tienen comando propio.
+CLI todavía no tienen comando propio. **Da igual por dónde cargues**: la terminal y la app
+escriben en el mismo libro y leen el mismo resumen.
+
+Si cargás un ticker que el sistema no tenía, **va a buscar su historial solo**. Tarda un par
+de segundos y la app avisa mientras lo trae; no hace falta correr nada a mano.
 
 ---
 
@@ -505,8 +509,9 @@ vendiste.
 | **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
 | **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
 
-Los precios son **el último cierre guardado**, no una cotización en vivo: la pantalla no
-sale a pedir datos. Si una posición no tiene velas guardadas, la app avisa que quedó
+Los precios son **el último cierre guardado**, no una cotización en vivo: **ninguna pantalla
+sale a pedir datos**. La única excepción es cargar un ticker nuevo, que sí dispara la primera
+descarga — es una escritura, la pediste vos, y pasa una sola vez por papel. Si una posición no tiene velas guardadas, la app avisa que quedó
 afuera del total en vez de valuarla en cero.
 
 **Todo se valúa en USD.** Si un papel cotiza en otra moneda —Yahoo devuelve la moneda real

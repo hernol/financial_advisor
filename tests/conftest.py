@@ -40,6 +40,34 @@ requires_postgres = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def no_network_market():
+    """No test may reach a provider, including through a background task.
+
+    The write path that warms a new ticker is the only one allowed to fetch in
+    production; here it gets a market that refuses, so a fetch that slipped into
+    a read path fails loudly instead of quietly costing a network call.
+    """
+    from fa.api import deps
+    from fa.errors import DataUnavailableError
+
+    class RefusingMarket:
+        def __init__(self, db):
+            self.calls: list[str] = []
+
+        def context(self, ticker, **kwargs):
+            self.calls.append(ticker)
+            raise DataUnavailableError(f"sin red en los tests ({ticker})")
+
+        def quote(self, ticker):
+            self.calls.append(ticker)
+            raise DataUnavailableError(f"sin red en los tests ({ticker})")
+
+    deps.set_market_factory(RefusingMarket)
+    yield
+    deps.set_market_factory(None)
+
+
 @pytest.fixture()
 def conn(tmp_path):
     """A migrated, empty database on whichever engine is under test."""

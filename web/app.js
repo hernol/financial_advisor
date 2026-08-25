@@ -765,14 +765,42 @@ function openTransactionForm(ticker = '') {
       for (const key of ['quantity', 'price', 'amount', 'ratio']) {
         if (v[key] !== '' && v[key] !== undefined) body[key] = Number(v[key]);
       }
-      await send('/api/portfolio/transactions', 'POST', body);
+      const created = await send('/api/portfolio/transactions', 'POST', body);
       sheet.close();
-      showOk('Movimiento cargado.');
       await loadPortfolio();
+      if (created.fetching_prices) {
+        // The server went to get them; say so and come back when they land,
+        // instead of leaving a holding that reads "sin precio" with no
+        // explanation of whose job it is to fix that.
+        showOk(`Movimiento cargado. Trayendo el historial de ${created.ticker}…`);
+        awaitPrices(created.ticker);
+      } else {
+        showOk('Movimiento cargado.');
+      }
     });
 }
 
 // --- cartera ----------------------------------------------------------------
+
+/** Poll until the first fetch of a ticker lands, then refresh. */
+async function awaitPrices(ticker, attempts = 12) {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    try {
+      const rows = await api('/api/tickers');
+      const row = rows.find((r) => r.ticker === ticker);
+      if (row && row.sessions) {
+        await loadPortfolio();
+        showOk(`${ticker}: ${row.sessions} ruedas cargadas.`);
+        return;
+      }
+    } catch {
+      return;  // the gate or the toast already said what happened
+    }
+  }
+  showError(`No se pudo traer el historial de ${ticker}. Revisá los proveedores.`);
+}
+
 
 const KIND_LABEL = {
   buy: 'compra', sell: 'venta', dividend: 'dividendo', split: 'split', fee: 'comisión',

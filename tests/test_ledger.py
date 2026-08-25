@@ -22,6 +22,7 @@ def test_adding_a_position_opens_its_ledger(conn):
     assert entries[0].kind == models.BUY
     assert entries[0].quantity == 10.0
     assert entries[0].price == 100.0
+    # The rollup is built from the entry, and the entry is linked back to it.
     assert entries[0].position_id == position.id
 
 

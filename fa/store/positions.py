@@ -1,8 +1,13 @@
-"""Positions: a rollup kept in step with the transaction ledger.
+"""Positions: a rollup recomputed from the transaction ledger.
 
-Every mutation here also appends to :mod:`fa.store.transactions`, so the
-position row is a convenience view that can always be rebuilt. Deletes are
-soft: the row leaves the listings, the history stays.
+The ledger is the truth and this table is a cache of it. Every write goes the
+same way — append an entry, then :func:`sync_from_ledger` rebuilds the row — so
+it does not matter whether the entry came from the terminal or from the phone.
+Before this, only ``add_position`` maintained the rollup, and a trade loaded
+from the dashboard was invisible to the CLI and to the alerts that need a
+position.
+
+Deletes are soft: the row leaves the listings, the history stays.
 """
 from __future__ import annotations
 
@@ -19,40 +24,117 @@ from fa.store.serde import row_to_position, to_iso
 def add_position(
     conn: Database, position: Position, *, account_id: int = LOCAL_ACCOUNT_ID
 ) -> Position:
-    """Store the position and open its ledger with the matching buy."""
-    now = datetime.now(timezone.utc)
-    new_id = conn.insert(
-        "INSERT INTO positions(account_id, ticker, quantity, buy_price, buy_date, currency, "
-        "notes, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            account_id,
-            position.ticker.upper(),
-            position.quantity,
-            position.buy_price,
-            to_iso(position.buy_date),
-            position.currency,
-            position.notes,
-            to_iso(now),
-            to_iso(now),
-        ),
-    )
-    stored = position.with_id(new_id)
-    conn.commit()
+    """Record the purchase and return the resulting holding.
+
+    Goes through the ledger like every other write, so buying the same ticker
+    twice produces one position at the average cost instead of two rows.
+    """
     transactions_store.record(
         conn,
         Transaction(
-            position_id=stored.id,
-            ticker=stored.ticker,
+            ticker=position.ticker,
             kind=models.BUY,
-            trade_date=stored.buy_date,
-            quantity=stored.quantity,
-            price=stored.buy_price,
-            currency=stored.currency,
-            note=stored.notes,
+            trade_date=position.buy_date,
+            quantity=position.quantity,
+            price=position.buy_price,
+            currency=position.currency,
+            note=position.notes,
         ),
         account_id=account_id,
     )
+    stored = sync_from_ledger(conn, position.ticker, account_id=account_id)
+    assert stored is not None  # noqa: S101 - a buy always leaves an open holding
     return stored
+
+
+def sync_from_ledger(
+    conn: Database, ticker: str, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Position | None:
+    """Rebuild one ticker's rollup from its ledger entries.
+
+    The single writer of this table. Call it after any change to the ledger and
+    the two can never drift; nothing else should write these columns.
+    """
+    from fa import ledger  # local: fa.ledger reads the transaction store
+
+    symbol = ticker.upper()
+    entries = transactions_store.list_transactions(conn, ticker=symbol, account_id=account_id)
+    holding = ledger.replay(symbol, entries)
+    row = conn.execute(
+        "SELECT * FROM positions WHERE ticker = ? AND account_id = ? AND deleted_at IS NULL",
+        (symbol, account_id),
+    ).fetchone()
+    now = to_iso(datetime.now(timezone.utc))
+
+    if not entries:
+        # Nothing left in the ledger: the rollup has nothing to summarise.
+        if row is not None:
+            conn.execute(
+                "UPDATE positions SET deleted_at = ?, updated_at = ? WHERE id = ?",
+                (now, now, row["id"]),
+            )
+            conn.commit()
+        return None
+
+    buys = [e for e in entries if e.kind == models.BUY]
+    opened = buys[0].trade_date if buys else entries[0].trade_date
+    sells = [e for e in entries if e.kind == models.SELL]
+    # A position archived by hand has no sale to point at; leaving it closed
+    # respects that instead of reopening it on the next unrelated entry.
+    manually_closed = row is not None and row["closed_at"] and not sells
+    closed = (not holding.is_open) or manually_closed
+    last_sell = sells[-1] if sells else None
+
+    values = (
+        holding.quantity,
+        holding.average_cost,
+        to_iso(opened),
+        holding.currency,
+        now if closed else None,
+        last_sell.price if last_sell else (row["close_price"] if row else None),
+        to_iso(last_sell.trade_date) if last_sell else (row["close_date"] if row else None),
+        holding.realized_pnl or None,
+        now,
+    )
+
+    if row is None:
+        conn.insert(
+            "INSERT INTO positions(account_id, ticker, quantity, buy_price, buy_date, currency, "
+            "notes, created_at, closed_at, close_price, close_date, realized_pnl, updated_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (account_id, symbol, values[0], values[1], values[2], values[3],
+             buys[0].note if buys else "", now, *values[4:]),
+        )
+    else:
+        conn.execute(
+            "UPDATE positions SET quantity = ?, buy_price = ?, buy_date = ?, currency = ?, "
+            "closed_at = ?, close_price = ?, close_date = ?, realized_pnl = ?, updated_at = ? "
+            "WHERE id = ?",
+            (*values, row["id"]),
+        )
+    conn.commit()
+    stored = get_position_for_ticker(conn, symbol, account_id=account_id)
+    if stored is not None:
+        # The entries are written before the rollup exists, so the back link is
+        # filled in here rather than left dangling.
+        conn.execute(
+            "UPDATE transactions SET position_id = ? "
+            "WHERE ticker = ? AND account_id = ? AND position_id IS NULL",
+            (stored.id, symbol, account_id),
+        )
+        conn.commit()
+    return stored
+
+
+def get_position_for_ticker(
+    conn: Database, ticker: str, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> Position | None:
+    """The rollup row for a ticker, open or closed."""
+    row = conn.execute(
+        "SELECT * FROM positions WHERE ticker = ? AND account_id = ? AND deleted_at IS NULL",
+        (ticker.upper(), account_id),
+    ).fetchone()
+    return row_to_position(row) if row else None
 
 
 def list_positions(
@@ -98,43 +180,47 @@ def close_position(
     close_date: date | None = None,
     fees: float = 0.0,
     note: str = "",
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> Position | None:
     """Close a position, recording the sale that closed it.
 
     ``price`` is optional only so an old position can be archived without
     inventing a number; when it is absent no sale is recorded and the realised
-    P&L stays ``NULL`` rather than being guessed at.
+    P&L stays unknown rather than being guessed at.
     """
-    position = get_position(conn, position_id)
+    position = get_position(conn, position_id, account_id=account_id)
     if position is None or position.closed_at is not None:
         return None
-    now = datetime.now(timezone.utc)
-    sold_on = close_date or now.date()
-    realized = None
-    if price is not None:
-        realized = (price - position.buy_price) * position.quantity - fees
-    conn.execute(
-        "UPDATE positions SET closed_at = ?, updated_at = ?, close_price = ?, close_date = ?, "
-        "realized_pnl = ? WHERE id = ?",
-        (to_iso(now), to_iso(now), price, to_iso(sold_on), realized, position_id),
-    )
-    conn.commit()
-    if price is not None:
-        transactions_store.record(
-            conn,
-            Transaction(
-                position_id=position_id,
-                ticker=position.ticker,
-                kind=models.SELL,
-                trade_date=sold_on,
-                quantity=position.quantity,
-                price=price,
-                fees=fees,
-                currency=position.currency,
-                note=note,
-            ),
+    sold_on = close_date or datetime.now(timezone.utc).date()
+
+    if price is None:
+        # Archived by hand: no entry to append, so the rollup is closed here and
+        # sync_from_ledger is told to respect it.
+        stamp = to_iso(datetime.now(timezone.utc))
+        conn.execute(
+            "UPDATE positions SET closed_at = ?, updated_at = ? WHERE id = ?",
+            (stamp, stamp, position_id),
         )
-    return get_position(conn, position_id)
+        conn.commit()
+        return get_position(conn, position_id, account_id=account_id)
+
+    transactions_store.record(
+        conn,
+        Transaction(
+            position_id=position_id,
+            ticker=position.ticker,
+            kind=models.SELL,
+            trade_date=sold_on,
+            quantity=position.quantity,
+            price=price,
+            fees=fees,
+            currency=position.currency,
+            note=note,
+        ),
+        account_id=account_id,
+    )
+    sync_from_ledger(conn, position.ticker, account_id=account_id)
+    return get_position(conn, position_id, account_id=account_id)
 
 
 def delete_position(conn: Database, position_id: int) -> bool:
@@ -149,37 +235,38 @@ def delete_position(conn: Database, position_id: int) -> bool:
 
 
 def apply_split(
-    conn: Database, position_id: int, ratio: float, *, split_date: date | None = None
+    conn: Database,
+    position_id: int,
+    ratio: float,
+    *,
+    split_date: date | None = None,
+    account_id: int = LOCAL_ACCOUNT_ID,
 ) -> Position | None:
     """Re-base a position after a split, keeping the original purchase on file.
 
-    The rollup is overwritten — that is what it is for — but the buy that
-    created it stays untouched in the ledger, so the price you actually paid
+    The rollup is recomputed — that is what it is for — but the buy that
+    created it stays untouched in the ledger, so the price actually paid
     survives every split that follows.
     """
-    position = get_position(conn, position_id)
+    position = get_position(conn, position_id, account_id=account_id)
     if position is None or ratio <= 0:
         return None
-    now = datetime.now(timezone.utc)
-    conn.execute(
-        "UPDATE positions SET buy_price = ?, quantity = ?, updated_at = ? WHERE id = ?",
-        (position.buy_price / ratio, position.quantity * ratio, to_iso(now), position_id),
-    )
-    conn.commit()
     transactions_store.record(
         conn,
         Transaction(
             position_id=position_id,
             ticker=position.ticker,
             kind=models.SPLIT,
-            trade_date=split_date or now.date(),
+            trade_date=split_date or datetime.now(timezone.utc).date(),
             ratio=ratio,
             currency=position.currency,
             source="split_detected",
             note=f"{ratio:g}:1 sobre {position.quantity:g} acciones a {position.buy_price:.4f}",
         ),
+        account_id=account_id,
     )
-    return get_position(conn, position_id)
+    sync_from_ledger(conn, position.ticker, account_id=account_id)
+    return get_position(conn, position_id, account_id=account_id)
 
 
 def update_buy_price(

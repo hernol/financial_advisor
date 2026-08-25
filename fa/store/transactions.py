@@ -96,7 +96,8 @@ def get_transaction(
 def soft_delete(
     conn: Database, transaction_id: int, *, account_id: int = LOCAL_ACCOUNT_ID
 ) -> bool:
-    """Retire an entry without erasing it."""
+    """Retire an entry without erasing it, and refresh what summarised it."""
+    entry = get_transaction(conn, transaction_id, account_id=account_id)
     stamp = to_iso(datetime.now(timezone.utc))
     cur = conn.execute(
         "UPDATE transactions SET deleted_at = ?, updated_at = ? "
@@ -104,6 +105,11 @@ def soft_delete(
         (stamp, stamp, transaction_id, account_id),
     )
     conn.commit()
+    if cur.rowcount and entry is not None:
+        # The rollup summarises the ledger, so removing an entry has to move it.
+        from fa.store import positions as positions_store
+
+        positions_store.sync_from_ledger(conn, entry.ticker, account_id=account_id)
     return cur.rowcount > 0
 
 

@@ -11,7 +11,7 @@ for a module level global.
 from __future__ import annotations
 
 import threading
-from typing import Iterator
+from typing import Any, Iterator
 
 from fa.config import load_settings
 from fa.store.database import Database
@@ -61,3 +61,29 @@ def get_db() -> Iterator[Database]:
     database = _database or open_database()
     with _lock:
         yield database
+
+
+_market_factory: Any = None
+
+
+def build_market(db: Database) -> Any:
+    """A market service for the few write paths allowed to fetch.
+
+    Built on demand rather than held on the app: reads must not have one within
+    reach, so that "the API does not call providers" stays structural instead of
+    a rule someone has to remember. Tests replace the factory so the suite never
+    reaches the network.
+    """
+    if _market_factory is not None:
+        return _market_factory(db)
+    from fa.market import MarketService
+    from fa.providers.chain import build_chain
+
+    settings = load_settings()
+    return MarketService(build_chain(settings), db, benchmark=settings.benchmark)
+
+
+def set_market_factory(factory: Any) -> None:
+    """Point the write paths at a different market. Used by the tests."""
+    global _market_factory
+    _market_factory = factory
