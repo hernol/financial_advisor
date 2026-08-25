@@ -156,6 +156,33 @@ Verificá:
 .venv/bin/python financial_analyzer.py portfolio     # P&L con precios en vivo
 ```
 
+### Vender, y qué queda registrado
+
+Se cierra desde el menú (opción *Ver / cerrar posiciones* → `c`). Pide **precio, fecha y
+comisiones**, y con eso calcula el P&L realizado.
+
+Si dejás el precio vacío, la posición se archiva **sin inventar la venta**: el resultado
+queda desconocido en vez de equivocado. Es preferible para una posición vieja de la que ya no
+te acordás a cuánto saliste.
+
+### El libro mayor
+
+Cada compra, venta, split y dividendo se escribe en `transactions`, que es **append-only**: no
+se edita ni se borra nada. Tus tenencias —cantidad, costo promedio, P&L realizado, dividendos
+cobrados— salen de replayar esas entradas, no de un campo guardado.
+
+Eso tiene tres consecuencias prácticas:
+
+- **Varias compras del mismo papel dan un costo promedio real.** Comprás 40 a 168 y después 20
+  a 132: el costo es 156, no el de la primera compra.
+- **Un split no destruye lo que pagaste.** El resumen se reescribe (40 acciones a 400 pasan a
+  160 a 100), pero la compra original sigue entera en el libro. Antes se pisaba y no había
+  vuelta atrás.
+- **Borrar es lógico.** Sacar un movimiento lo quita del cálculo y lo deja registrado.
+
+Desde el dashboard también se cargan movimientos, incluidos dividendos y comisiones, que por
+CLI todavía no tienen comando propio.
+
 ---
 
 ## 3. Trabajar sobre un ticker
