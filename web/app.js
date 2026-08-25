@@ -188,6 +188,56 @@ async function loadList() {
   }
 }
 
+
+// --- buscar un ticker que no seguís -----------------------------------------
+
+function showSearching(on, stage = 'Buscando…') {
+  $('search-stage').textContent = stage;
+  $('search-working').hidden = !on;
+}
+
+/** Bring a ticker in, then open it. Looking it up does not follow it. */
+async function lookupTicker(symbol) {
+  const ticker = symbol.trim().toUpperCase();
+  if (!ticker) return;
+  if (!/^[A-Z0-9.\-]{1,12}$/.test(ticker)) {
+    showError(`"${ticker}" no parece un símbolo.`);
+    return;
+  }
+
+  showSearching(true, `Buscando ${ticker}…`);
+  try {
+    const started = await send(`/api/tickers/${ticker}/lookup`, 'POST');
+    if (!started.fetching) {
+      showSearching(false);
+      showDetail(ticker);
+      return;
+    }
+    // The fetch is five years of bars plus the statements, and the endpoint
+    // starts answering as soon as the first rows land — opening then shows a
+    // ticker with no price yet. Wait for the indicator reading, which is
+    // written last and is what the screen is actually made of.
+    for (let i = 0; i < 20; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      const response = await fetch(`/api/tickers/${ticker}`, {
+        headers: session.token ? { Authorization: `Bearer ${session.token}` } : {},
+      });
+      if (!response.ok) continue;
+      const detail = await response.json();
+      if (detail.price != null) {
+        showSearching(false);
+        showDetail(ticker);
+        return;
+      }
+    }
+    showSearching(false);
+    showError(`No se pudo traer ${ticker}. ¿Está bien el símbolo?`);
+  } catch (e) {
+    showSearching(false);
+    showError(e.message);
+  }
+}
+
 // --- detalle ----------------------------------------------------------------
 
 async function showDetail(ticker) {
@@ -201,14 +251,18 @@ async function showDetail(ticker) {
   pickTab('chart');
 
   try {
-    const detail = await api(`/api/tickers/${ticker}`);
-    renderHead(detail);
-    renderStats(detail.indicators);
-    renderSeriesPicker(detail.series);
-    await Promise.all([loadChart(), loadAlerts()]);
+    await paintDetail(ticker);
   } catch (e) {
     showError(e.message);
   }
+}
+
+async function paintDetail(ticker) {
+  const detail = await api(`/api/tickers/${ticker}`);
+  renderHead(detail);
+  renderStats(detail.indicators);
+  renderSeriesPicker(detail.series);
+  await Promise.all([loadChart(), loadAlerts()]);
 }
 
 function renderHead(detail) {
@@ -229,6 +283,10 @@ function renderHead(detail) {
   $('d-trend').textContent = trend || '';
   $('d-trend').className = `chip solid ${safeClass(trend, TREND_CLASSES, 'neutral')}`;
   $('d-trend').hidden = !trend;
+
+  // Looking a ticker up does not add it to the list, so the screen says so
+  // rather than leaving the person wondering why it is not there afterwards.
+  $('d-unfollowed').hidden = detail.followed !== false;
 
   const c = detail.coverage;
   // textContent, so no escaping needed and none pretended.
@@ -1443,6 +1501,7 @@ function showView(view) {
   state.ticker = null;
   destroyCharts('price', 'series');
 
+  showSearching(false);
   $('view-portfolio').hidden = view !== 'portfolio';
   $('view-list').hidden = view !== 'tickers';
   $('view-detail').hidden = true;
@@ -1481,6 +1540,15 @@ document.addEventListener('DOMContentLoaded', () => {
   for (const item of document.querySelectorAll('.nav-item')) {
     item.addEventListener('click', () => navigate(item.dataset.view));
   }
+
+  $('search').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const input = $('search-input');
+    const value = input.value;
+    input.value = '';
+    input.blur();
+    lookupTicker(value);
+  });
 
   $('add-tx').addEventListener('click', () => openTransactionForm());
   $('ask-ai').addEventListener('click', openReportForm);

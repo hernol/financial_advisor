@@ -13,12 +13,13 @@ import logging
 from datetime import date, timedelta
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
 
 from fa.api.auth import account_id
 from fa.api.deps import get_db
 from fa.indicators import sma_series
 from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
+from fa.models import TICKER_PATTERN
 from fa.store import alerts as alerts_store
 from fa.store import fundamentals as fundamentals_store
 from fa.store import history as history_store
@@ -90,10 +91,7 @@ def ticker_detail(ticker: str, db: Database = Depends(get_db),
     if not coverage["sessions"]:
         raise HTTPException(
             status_code=404,
-            detail=(
-                f"No hay datos guardados de {symbol}. Corré 'check-alerts' o "
-                "agregá una alerta para que el próximo chequeo lo traiga."
-            ),
+            detail=f"Todavía no hay datos de {symbol}.",
         )
     latest = history_store.latest_indicators(db, symbol)
     payload = dict(latest["payload"]) if latest else {}
@@ -102,6 +100,7 @@ def ticker_detail(ticker: str, db: Database = Depends(get_db),
     change_abs, change_pct = _session_change(db, symbol, price)
     return {
         "ticker": symbol,
+        "followed": symbol in _tracked(db, account),
         "coverage": coverage,
         "taken_at": latest["taken_at"] if latest else None,
         "price": price,
@@ -283,6 +282,33 @@ def ticker_events(
 # headline numbers, then the ones that say whether the business is any good.
 SUMMARY_FIELDS = list(SUMMARY_COLUMNS)
 QUALITY_FIELDS = list(QUALITY_COLUMNS)
+
+
+@router.post("/tickers/{ticker}/lookup", status_code=202)
+def lookup_ticker(
+    ticker: str = Path(pattern=TICKER_PATTERN),
+    background: BackgroundTasks = None,  # noqa: B008 - FastAPI injects it
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Bring in a ticker nobody is following yet.
+
+    The terminal can analyse any symbol on the spot; the dashboard could only
+    reach what was already stored, so a ticker you had never touched was
+    unreachable. This is the write that introduces one: prices, indicators and
+    statements, in the background.
+
+    Looking one up does not start following it. That happens when you give it
+    an alert or a position, which is what "following" has always meant here.
+    """
+    from fa.api.deps import build_market
+    from fa.warm import has_prices, warm
+
+    symbol = ticker.upper()
+    if has_prices(db, symbol):
+        return {"ticker": symbol, "status": "ready", "fetching": False}
+    background.add_task(warm, db, build_market(db), symbol)
+    return {"ticker": symbol, "status": "running", "fetching": True}
 
 
 @router.get("/tickers/{ticker}/fundamentals")

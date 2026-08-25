@@ -125,6 +125,20 @@
   </section>
 
   <section id="view-list" class="view" aria-label="Tickers seguidos" hidden>
+    <form id="search" class="search" role="search">
+      <label class="sr-only" for="search-input">Buscar un ticker</label>
+      <input id="search-input" type="text" name="ticker" placeholder="Buscar un ticker: NVDA"
+             autocapitalize="characters" autocomplete="off" spellcheck="false"
+             maxlength="12" enterkeyhint="search">
+      <button type="submit" class="add" id="search-go">Ver</button>
+    </form>
+    <div id="search-working" class="working" role="status" aria-live="polite" hidden>
+      <span class="spinner" aria-hidden="true"></span>
+      <span class="working-text">
+        <b id="search-stage">Buscando…</b>
+        <small id="search-note">Trayendo precios, indicadores y balances</small>
+      </span>
+    </div>
     <ul id="ticker-list" class="cards grid2"></ul>
     <p id="list-empty" class="notice" hidden>
       Todavía no hay nada seguido. Cargá una posición o una alerta desde la
@@ -138,6 +152,7 @@
         <span id="d-price" class="big tnum">—</span>
         <span id="d-delta" class="delta tnum"></span>
         <span id="d-trend" class="chip solid"></span>
+        <span id="d-unfollowed" class="chip neutral" hidden>sin seguir</span>
       </div>
       <p id="d-coverage" class="coverage"></p>
     </div>

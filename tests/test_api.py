@@ -103,9 +103,10 @@ def test_the_list_shows_what_is_tracked(client, conn):
 
 
 def test_a_ticker_with_no_stored_data_says_so(client):
+    """A plain 404: the client turns it into a lookup rather than an error."""
     response = client.get("/api/tickers/NOPE")
     assert response.status_code == 404
-    assert "No hay datos guardados" in response.json()["detail"]
+    assert "Todavía no hay datos" in response.json()["detail"]
 
 
 def test_detail_carries_the_indicator_payload(client, conn):

@@ -514,7 +514,15 @@ la cartera y el libro mayor de movimientos. Las tenencias salen del ledger, así
 costo es el promedio real de todas tus compras y el P&L realizado incluye lo que ya
 vendiste.
 
-**Tickers** — la pantalla de un papel, con tres pestañas:
+**Tickers** — arriba hay un **buscador**: escribís un símbolo que no estás siguiendo, la app
+lo trae —precios, indicadores y balances— y lo abre. Es el equivalente de `analyze NVDA` en la
+terminal.
+
+Buscarlo **no es seguirlo**: no entra a la lista y la pantalla lo marca como `sin seguir`. Se
+empieza a seguir cuando le ponés una alerta o cargás una posición, que es lo que "seguir"
+significó siempre acá.
+
+Cada papel tiene cinco pestañas:
 
 | Pestaña | Contenido |
 |---|---|

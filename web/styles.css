@@ -972,3 +972,35 @@ table.grid td.down { color: var(--down); }
     opacity: .55;
   }
 }
+
+/* --- ticker search -------------------------------------------------------- */
+
+.search { display: flex; gap: var(--s2); margin-bottom: var(--s3); }
+.search input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  font: inherit;
+  font-family: var(--f-mono);
+  font-size: .92rem;
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r2);
+  padding: 0 var(--s3);
+}
+.search input::placeholder { color: var(--fg-dim); }
+.search input:hover { border-color: var(--border); }
+.search input:focus { border-color: var(--accent); }
+.search .add { min-height: var(--tap); }
+
+/* Visible to a screen reader, not on screen: the placeholder is a hint, and a
+   field with only a hint has no name once it has a value. */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
