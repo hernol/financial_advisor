@@ -811,12 +811,19 @@ function renderPortfolioHead(p) {
     : '';
 
   // Being told a total is short a position matters more than the total.
-  const warn = $('p-unpriced');
-  warn.hidden = !p.unpriced.length;
+  const notes = [];
   if (p.unpriced.length) {
-    warn.textContent = `Sin precio guardado para ${p.unpriced.join(', ')}: `
-      + 'esas posiciones no entran en el total. Corré check-alerts para traer sus velas.';
+    notes.push(`Sin precio guardado para ${p.unpriced.join(', ')}: no entran en el total. `
+      + 'Corré check-alerts para traer sus velas.');
   }
+  if ((p.foreign_currency || []).length) {
+    const which = p.foreign_currency.map((f) => `${f.ticker} (${f.currency})`).join(', ');
+    notes.push(`La cartera se valúa en ${p.base_currency}, y ${which} no cotiza en esa `
+      + 'moneda: queda afuera del total.');
+  }
+  const warn = $('p-unpriced');
+  warn.hidden = notes.length === 0;
+  warn.textContent = notes.join(' ');
 }
 
 const TOTALS = [

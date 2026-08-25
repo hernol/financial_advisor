@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Sequence
 
+from fa.config import BASE_CURRENCY
 from fa.errors import DataUnavailableError
 from fa.market import MarketService
 from fa.models import Position
@@ -27,6 +28,10 @@ class Holding:
     @property
     def market_value(self) -> float | None:
         return None if self.price is None else self.price * self.position.quantity
+
+    @property
+    def is_base_currency(self) -> bool:
+        return self.currency.upper() == BASE_CURRENCY
 
     @property
     def pnl(self) -> tuple[float, float] | None:
@@ -56,6 +61,11 @@ class Portfolio:
         """Holdings that got a live price; the rest are reported, never guessed."""
         return tuple(h for h in self.holdings if h.price is not None)
 
+    @property
+    def excluded(self) -> Sequence[Holding]:
+        """Holdings left out of the total, each carrying the reason why."""
+        return tuple(h for h in self.holdings if h.price is None)
+
 
 def build_portfolio(
     conn: Database, market: MarketService, *, record: bool = True
@@ -67,6 +77,21 @@ def build_portfolio(
             quote = market.quote(position.ticker)
         except DataUnavailableError as exc:
             holdings.append(Holding(position=position, price=None, currency=position.currency, error=str(exc)))
+            continue
+        if quote.currency.upper() != BASE_CURRENCY:
+            # Yahoo reports the listing's own currency. Adding a euro price into
+            # a dollar total would look like a number and be a lie.
+            holdings.append(
+                Holding(
+                    position=position,
+                    price=None,
+                    currency=quote.currency,
+                    error=(
+                        f"{position.ticker} cotiza en {quote.currency} y la cartera se "
+                        f"valúa en {BASE_CURRENCY}: queda fuera del total."
+                    ),
+                )
+            )
             continue
         holdings.append(Holding(position=position, price=quote.price, currency=quote.currency))
     portfolio = Portfolio(holdings=tuple(holdings))

@@ -482,6 +482,11 @@ Los precios son **el último cierre guardado**, no una cotización en vivo: la p
 sale a pedir datos. Si una posición no tiene velas guardadas, la app avisa que quedó
 afuera del total en vez de valuarla en cero.
 
+**Todo se valúa en USD.** Si un papel cotiza en otra moneda —Yahoo devuelve la moneda real
+del listado— queda fuera del total y la app dice cuál y por qué. Sumarlo sin tabla de
+cotizaciones daría un número que parece correcto y no lo es. Cargar una operación en otra
+moneda también se rechaza, con el mismo motivo.
+
 ### Cargar cosas desde el teléfono
 
 Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**

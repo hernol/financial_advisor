@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from fa import ledger, models
 from fa.api.auth import account_id
 from fa.api.deps import get_db
+from fa.config import BASE_CURRENCY
 from fa.store import history as history_store
 from fa.store.database import Database
 
@@ -45,8 +46,9 @@ def portfolio(
     realized = 0.0
     dividends = 0.0
     fees = 0.0
-    currency = "USD"
+    currency = BASE_CURRENCY
     missing: list[str] = []
+    foreign: list[dict[str, str]] = []
 
     for holding in ledger.holdings(db, open_only=False, account_id=account):
         realized += holding.realized_pnl
@@ -57,15 +59,23 @@ def portfolio(
             continue
 
         price, previous = _last_two_closes(db, holding.ticker)
-        if price is None:
+        if holding.currency.upper() != BASE_CURRENCY:
+            # One currency, no conversion table. Adding these into the total
+            # would produce a number that looks right and is not.
+            foreign.append({"ticker": holding.ticker, "currency": holding.currency})
+            price = None
+        elif price is None:
             # No stored bar means no honest valuation. Say so rather than
             # silently valuing the position at zero or at its cost.
             missing.append(holding.ticker)
         value = holding.market_value(price) if price is not None else None
         pnl = holding.unrealized(price) if price is not None else (None, None)
 
-        cost_basis += holding.cost_basis
-        market_value += value or 0.0
+        if price is not None:
+            # A holding kept out of the total has to stay out of the cost too,
+            # or the P&L compares a partial value against a full basis.
+            cost_basis += holding.cost_basis
+            market_value += value or 0.0
         rows.append(
             {
                 "ticker": holding.ticker,
@@ -104,6 +114,8 @@ def portfolio(
         "dividends": dividends,
         "fees": fees,
         "unpriced": missing,
+        "foreign_currency": foreign,
+        "base_currency": BASE_CURRENCY,
     }
 
 
@@ -218,6 +230,15 @@ def add_transaction(
         )
     if body.trade_date > date.today():
         raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
+    if body.currency.upper() != BASE_CURRENCY:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"La cartera se lleva en {BASE_CURRENCY}. Para operar en "
+                f"{body.currency.upper()} hace falta una tabla de cotizaciones que "
+                "todavía no existe."
+            ),
+        )
 
     entry = transactions_store.record(
         db,

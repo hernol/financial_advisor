@@ -21,6 +21,13 @@ DEFAULT_LOCAL_AI_MAX_TOKENS = 2000
 # Index the positions are measured against for relative strength.
 DEFAULT_BENCHMARK = "SPY"
 
+# The application values everything in one currency. Mixing them without a
+# conversion table produces a total that is quietly wrong, which is worse than
+# refusing the position, so anything else is excluded and reported rather than
+# summed. Changing this is not a matter of editing the constant: it needs an FX
+# table and a decision about which rate applies to a historical trade.
+BASE_CURRENCY = "USD"
+
 
 def _flag(name: str, default: bool = False) -> bool:
     raw = os.environ.get(name)
