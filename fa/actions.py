@@ -7,20 +7,18 @@ from typing import Any, Mapping
 
 import pandas as pd
 
-from fa import ai
-from fa.ai_context import DataPack, build_data_pack
-from fa.alerts import authoring, kinds
+from fa import reporting
+from fa.ai_context import DataPack
+from fa.alerts import authoring
 from fa.alerts.engine import CheckReport, run_checks
 from fa.alerts.suggestions import actionable
 from fa.app import App
 from fa.digest import collect_facts
 from fa.errors import ValidationError
-from fa.local_tasks import extract_claims, portfolio_digest
+from fa.local_tasks import portfolio_digest
 from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
 from fa.models import AIReport, Alert, MarketContext, Position, Quote, Suggestion
 from fa.portfolio import build_portfolio
-from fa.store import alerts as alerts_store
-from fa.store import events as events_store
 from fa.store import positions as positions_store
 from fa.store import suggestions as suggestions_store
 from fa.ui.charts import draw_bar_chart, print_table
@@ -79,64 +77,31 @@ def _estimated_debt(frame: pd.DataFrame) -> bool:
 
 def build_data_pack_for(app: App, ticker: str, external_context: str = "") -> DataPack:
     """Assemble the grounded payload: live prices, fundamentals, exposure and gaps."""
-    annual, quarterly, context, source = load_analysis(app, ticker)
-    claims = extract_claims(app.local_ai, external_context) if external_context else None
-    return build_data_pack(
-        context,
-        annual,
-        quarterly,
-        source,
-        positions_store.positions_for_ticker(app.conn, ticker),
-        alerts_store.list_alerts(app.conn, ticker=ticker, only_active=True),
-        external_claims=claims,
-    )
+    return reporting.build_pack(app.conn, app.market, app.local_ai, ticker, external_context)
 
 
 def run_ai_report(app: App, ticker: str, external_context: str = "") -> AIReport:
-    """Ground the model on live data, ask for the report, persist it with its suggestions."""
-    data_pack = build_data_pack_for(app, ticker, external_context)
-    report = ai.analyze(
-        app.settings, ticker, data_pack, external_context, local_client=app.local_ai
-    )
-    analysis_id = events_store.save_analysis(
-        app.conn,
-        ticker,
-        report.model,
-        f"{data_pack.provenance}\n\n{data_pack.text}",
-        external_context,
-        report.text,
-    )
-    stored = suggestions_store.add_suggestions(
-        app.conn, report.suggestions, analysis_id=analysis_id, model=report.model
-    )
-    return AIReport(
-        ticker=report.ticker,
-        text=report.text,
-        suggestions=stored,
-        model=report.model,
-        provenance=data_pack.provenance,
-        analysis_id=analysis_id,
+    """Ground the model on live data, ask for the report, persist it."""
+    return reporting.run_report(
+        app.conn, app.market, app.settings, app.local_ai, ticker, external_context
     )
 
 
-def accept_suggestion(app: App, suggestion: Suggestion, overrides: dict[str, Any] | None = None) -> Alert:
+def accept_suggestion(
+    app: App, suggestion: Suggestion, overrides: dict[str, Any] | None = None
+) -> Alert:
     """Turn an accepted suggestion into a real alert and mark it as such."""
-    if suggestion.category != "alert" or suggestion.kind not in kinds.CATALOGUE:
-        raise ValidationError(
-            f"La sugerencia '{suggestion.headline}' es una acción, no una alerta automatizable."
-        )
-    params = {**dict(suggestion.params), **(overrides or {})}
-    alert = add_alert(app, suggestion.ticker, suggestion.kind, params, note=suggestion.rationale[:200])
-    if suggestion.id is not None:
-        suggestions_store.resolve(app.conn, suggestion.id, suggestions_store.ACCEPTED, alert.id)
-    return alert
+    return reporting.accept(
+        app.conn,
+        suggestion,
+        overrides,
+        price_for=lambda symbol: app.market.quote(symbol).price,
+        default_cooldown_hours=app.settings.default_cooldown_hours,
+    )
 
 
 def reject_suggestion(app: App, suggestion: Suggestion, *, status: str | None = None) -> None:
-    if suggestion.id is not None:
-        suggestions_store.resolve(
-            app.conn, suggestion.id, status or suggestions_store.REJECTED, None
-        )
+    reporting.reject(app.conn, suggestion, status=status)
 
 
 def pending_suggestions(app: App, ticker: str | None = None) -> list[Suggestion]:

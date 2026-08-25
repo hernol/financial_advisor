@@ -9,10 +9,11 @@ to show, which the response says plainly instead of filling in.
 """
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 
 from fa.api.auth import account_id
 from fa.api.deps import get_db
@@ -23,6 +24,7 @@ from fa.store import positions as positions_store
 from fa.store import runs as runs_store
 from fa.store.database import Database
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["tickers"])
 
 FAST_SMA = 50
@@ -267,6 +269,45 @@ def ticker_events(
         }
         for row in rows
     ]
+
+
+@router.post("/tickers/{ticker}/check", status_code=202)
+def check_now(
+    ticker: str,
+    background: BackgroundTasks,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Evaluate this ticker's alerts right now instead of waiting for the timer.
+
+    A check fetches and can deliver, so it is not a read; it runs in the
+    background and the client refreshes when the run is recorded.
+    """
+    from fa.api.deps import build_market
+    from fa.config import load_settings
+    from fa.notify.dispatcher import build_dispatcher
+
+    symbol = ticker.upper()
+    if not alerts_store.list_alerts(db, ticker=symbol, only_active=True, account_id=account):
+        raise HTTPException(status_code=422, detail=f"{symbol} no tiene alertas activas.")
+
+    def run() -> None:
+        from fa.alerts.engine import run_checks
+
+        settings = load_settings()
+        try:
+            run_checks(
+                db,
+                build_market(db),
+                build_dispatcher(settings, echo=False),
+                ticker=symbol,
+                trigger="api",
+            )
+        except Exception:  # noqa: BLE001 - a failed check must not kill the worker
+            logger.exception("on-demand check of %s failed", symbol)
+
+    background.add_task(run)
+    return {"ticker": symbol, "status": "running"}
 
 
 @router.get("/health")

@@ -521,6 +521,7 @@ vendiste.
 | **Precio** | Cierres con SMA50 y SMA200, ventanas de 1M a 5A, y la grilla de indicadores |
 | **Indicador** | Un indicador a lo largo del tiempo — el historial que antes no se guardaba |
 | **Alertas** | Cada alerta con sus parámetros y cómo salió en la última corrida, más los disparos |
+| **IA** | Pedir el informe estratégico, leerlo, y convertir sus sugerencias en alertas |
 
 Los precios son **el último cierre guardado**, no una cotización en vivo: **ninguna pantalla
 sale a pedir datos**. La única excepción es cargar un ticker nuevo, que sí dispara la primera
@@ -536,6 +537,17 @@ moneda también se rechaza, con el mismo motivo.
 
 Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**
 (compra, venta, dividendo, split, comisión) y **marcar avisos como vistos**.
+
+Desde la pestaña **IA** se pide el informe a Gemini. Tarda entre medio minuto y un minuto,
+así que corre en segundo plano y la pantalla avisa cuando está. Lo que devuelve queda
+guardado: los informes viejos se leen sin volver a pedirlos.
+
+Las **sugerencias** que propone se aceptan con un botón y se vuelven alertas de verdad. Las
+que no son automatizables —"tomar ganancias parciales", "mirar el balance del 10/09"— se
+muestran distinto y lo dicen: son una acción tuya, no una regla que el sistema pueda vigilar.
+
+En la pestaña *Alertas* hay además **Chequear ahora**, que evalúa las alertas de ese papel sin
+esperar al timer.
 
 El formulario de alerta se arma solo a partir del catálogo: los 18 tipos con sus valores
 por defecto y sus opciones salen de `fa/alerts/kinds.py`, así que un tipo nuevo aparece en

@@ -149,6 +149,8 @@
               aria-controls="tab-indicator" id="tabbtn-indicator">Indicador</button>
       <button class="tab" data-tab="alerts" role="tab" aria-selected="false"
               aria-controls="tab-alerts" id="tabbtn-alerts">Alertas</button>
+      <button class="tab" data-tab="ai" role="tab" aria-selected="false"
+              aria-controls="tab-ai" id="tabbtn-ai">IA</button>
     </div>
 
     <div id="tab-chart" class="panel" role="tabpanel" aria-labelledby="tabbtn-chart">
@@ -175,8 +177,27 @@
         </button>
       </div>
       <ul id="alert-list" class="cards"></ul>
-      <h2 class="section-h">Disparos</h2>
+      <div class="section-head">
+        <h2 class="section-h">Disparos</h2>
+        <button id="check-now" class="add" type="button">
+          <svg aria-hidden="true"><use href="#i-refresh"/></svg> Chequear ahora
+        </button>
+      </div>
       <ul id="event-list" class="cards"></ul>
+    </div>
+
+    <div id="tab-ai" class="panel" role="tabpanel" aria-labelledby="tabbtn-ai" hidden>
+      <div class="section-head">
+        <h2 class="section-h">Sugerencias pendientes</h2>
+        <button id="ask-ai" class="add" type="button">
+          <svg aria-hidden="true"><use href="#i-plus"/></svg> Pedir informe
+        </button>
+      </div>
+      <p id="ai-status" class="note"></p>
+      <ul id="suggestion-list" class="cards"></ul>
+
+      <h2 class="section-h">Informes</h2>
+      <div id="report-list"></div>
     </div>
   </section>
 

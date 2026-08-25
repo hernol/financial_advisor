@@ -1033,6 +1033,161 @@ function renderLedger(txs) {
   }
 }
 
+
+// --- informe de IA y sugerencias --------------------------------------------
+
+const PRIORITY_LABEL = { high: 'alta', medium: 'media', low: 'baja' };
+
+async function loadAI() {
+  const [suggestions, reports] = await Promise.all([
+    api(`/api/suggestions?ticker=${state.ticker}`),
+    api(`/api/tickers/${state.ticker}/analyses`),
+  ]);
+  renderSuggestions(suggestions);
+  renderReports(reports);
+}
+
+function renderSuggestions(rows) {
+  const list = $('suggestion-list');
+  list.innerHTML = '';
+  if (!rows.length) {
+    list.innerHTML = '<li class="notice">Sin sugerencias pendientes. '
+      + 'Pedí un informe y la IA propone alertas concretas.</li>';
+    return;
+  }
+  for (const s of rows) {
+    const li = document.createElement('li');
+    li.className = `suggestion${s.actionable ? '' : ' advice'}`;
+    const params = Object.entries(s.params).map(([k, v]) => `<b>${k} ${v}</b>`).join('');
+    li.innerHTML = `
+      <div class="row-top">
+        <span class="alert-name">${s.headline}</span>
+        <span class="priority ${s.priority}">${PRIORITY_LABEL[s.priority] || s.priority}</span>
+      </div>
+      ${params ? `<div class="params">${params}</div>` : ''}
+      <p class="why">${s.rationale}</p>
+      <div class="alert-actions">
+        ${s.actionable ? '<button class="mini" data-act="accept">Crear alerta</button>' : ''}
+        <button class="mini" data-act="reject">${s.actionable ? 'Descartar' : 'Listo'}</button>
+      </div>
+      ${s.actionable ? '' : '<p class="note">Es una acción para vos, no una regla que el '
+        + 'sistema pueda vigilar solo.</p>'}`;
+
+    const accept = li.querySelector('[data-act="accept"]');
+    if (accept) {
+      accept.addEventListener('click', async () => {
+        try {
+          const created = await send(`/api/suggestions/${s.id}/accept`, 'POST', { params: {} });
+          showOk(`Alerta ${created.kind} creada para ${created.ticker}.`);
+          await Promise.all([loadAI(), loadAlerts()]);
+        } catch (e) { showError(e.message); }
+      });
+    }
+    li.querySelector('[data-act="reject"]').addEventListener('click', async () => {
+      try {
+        await send(`/api/suggestions/${s.id}/reject`, 'POST');
+        await loadAI();
+      } catch (e) { showError(e.message); }
+    });
+    list.appendChild(li);
+  }
+}
+
+function renderReports(rows) {
+  const box = $('report-list');
+  box.innerHTML = '';
+  if (!rows.length) {
+    box.innerHTML = '<p class="notice">Todavía no pediste ningún informe.</p>';
+    return;
+  }
+  rows.forEach((r, index) => {
+    const details = document.createElement('details');
+    details.className = 'report';
+    if (index === 0) details.open = true;
+    details.innerHTML = `
+      <summary><span>${r.created_at.slice(0, 16).replace('T', ' ')}</span>
+        <span>${r.model}</span></summary>
+      <div class="body">${renderReportBody(r.report)}</div>
+      <p class="prov">${escapeHtml(r.provenance)}</p>`;
+    box.appendChild(details);
+  });
+}
+
+// The report is model output rendered into the page, so it is escaped first: a
+// stray < in a number would eat the rest of the paragraph at best.
+function escapeHtml(text) {
+  const node = document.createElement('div');
+  node.textContent = text || '';
+  return node.innerHTML;
+}
+
+// Just enough markdown to make the report readable. Applied *after* escaping,
+// so the only tags that can reach the DOM are the ones written here.
+function renderReportBody(text) {
+  return escapeHtml(text)
+    .replace(/^#{1,6}\s*(.+)$/gm, '<b class="md-h">$1</b>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/^\s*[-*]\s+(.+)$/gm, '<span class="md-li">$1</span>')
+    .replace(/^\s*---+\s*$/gm, '<span class="md-hr"></span>');
+}
+
+async function askForReport() {
+  const button = $('ask-ai');
+  button.disabled = true;
+  $('ai-status').textContent = 'Pidiendo el informe… puede tardar un minuto.';
+  try {
+    await send(`/api/tickers/${state.ticker}/analysis`, 'POST', { context: '' });
+    await watchReport();
+  } catch (e) {
+    $('ai-status').textContent = '';
+    showError(e.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function watchReport(attempts = 40) {
+  for (let i = 0; i < attempts; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    let state_;
+    try {
+      state_ = await api(`/api/tickers/${state.ticker}/analysis/status`);
+    } catch {
+      return;
+    }
+    if (state_.status === 'done') {
+      $('ai-status').textContent = state_.suggestions
+        ? `Listo: ${state_.suggestions} sugerencia(s).` : 'Listo. Sin sugerencias nuevas.';
+      await loadAI();
+      return;
+    }
+    if (state_.status === 'error') {
+      $('ai-status').textContent = '';
+      showError(state_.detail || 'El informe falló.');
+      return;
+    }
+  }
+  $('ai-status').textContent = 'Sigue corriendo. Volvé a esta pestaña en un rato.';
+}
+
+async function checkNow() {
+  const button = $('check-now');
+  button.disabled = true;
+  try {
+    await send(`/api/tickers/${state.ticker}/check`, 'POST');
+    showOk('Chequeando…');
+    // The run writes its rows as it goes; give it a moment and re-read.
+    setTimeout(() => {
+      loadAlerts().catch(() => {});
+      loadStatus();
+    }, 6000);
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 // --- navegación -------------------------------------------------------------
 
 function pickTab(name) {
@@ -1042,10 +1197,12 @@ function pickTab(name) {
   $('tab-chart').hidden = name !== 'chart';
   $('tab-indicator').hidden = name !== 'indicator';
   $('tab-alerts').hidden = name !== 'alerts';
+  $('tab-ai').hidden = name !== 'ai';
 
   if (name === 'indicator' && !state.charts.series) {
     loadSeries().catch((e) => showError(e.message));
   }
+  if (name === 'ai') loadAI().catch((e) => showError(e.message));
   // uPlot se dimensiona al construirse; uno construido oculto mide cero.
   if (name === 'chart' && state.charts.price) state.charts.price.setSize(chartSize(240));
 }
@@ -1105,6 +1262,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   $('add-tx').addEventListener('click', () => openTransactionForm());
+  $('ask-ai').addEventListener('click', askForReport);
+  $('check-now').addEventListener('click', checkNow);
   $('add-alert').addEventListener('click', () => {
     openAlertForm(state.ticker).catch((e) => showError(e.message));
   });

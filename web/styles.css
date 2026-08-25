@@ -801,3 +801,79 @@ select:hover { border-color: var(--border); }
   cursor: pointer;
 }
 .logout:hover { color: var(--fg-muted); border-color: var(--border); }
+
+/* --- AI report and suggestions -------------------------------------------- */
+
+.suggestion {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r2);
+  padding: var(--s3) var(--s4);
+  display: grid;
+  gap: var(--s2);
+}
+/* An "action" is advice the engine cannot run; it should not look like a rule
+   waiting to be switched on. */
+.suggestion.advice { border-left-color: var(--fg-dim); }
+.suggestion .why { font-size: .85rem; color: var(--fg-muted); margin: 0; }
+
+.priority { font-family: var(--f-mono); font-size: .64rem; text-transform: uppercase; letter-spacing: .06em; }
+.priority.high { color: var(--down); }
+.priority.medium { color: var(--warn); }
+.priority.low { color: var(--fg-dim); }
+
+.report {
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r2);
+  margin-bottom: var(--s3);
+  overflow: hidden;
+}
+.report summary {
+  padding: var(--s3) var(--s4);
+  cursor: pointer;
+  font-family: var(--f-mono);
+  font-size: .78rem;
+  color: var(--fg-muted);
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: baseline;
+}
+.report summary::-webkit-details-marker { display: none; }
+.report summary:hover { color: var(--fg); }
+.report[open] summary { border-bottom: 1px solid var(--border-soft); }
+.report .body {
+  padding: var(--s4);
+  font-size: .88rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.report .prov {
+  font-family: var(--f-mono);
+  font-size: .7rem;
+  color: var(--fg-dim);
+  padding: 0 var(--s4) var(--s4);
+  overflow-wrap: anywhere;
+}
+
+/* Minimal markdown, rendered from escaped text — see renderReportBody(). */
+.report .body .md-h {
+  display: block;
+  margin: var(--s4) 0 var(--s2);
+  color: var(--fg);
+  font-size: .94rem;
+  letter-spacing: -.01em;
+}
+.report .body .md-h:first-child { margin-top: 0; }
+.report .body .md-li { display: block; padding-left: var(--s3); text-indent: -0.7rem; }
+.report .body .md-li::before { content: "· "; color: var(--accent); }
+.report .body .md-hr {
+  display: block;
+  height: 1px;
+  background: var(--border-soft);
+  margin: var(--s4) 0;
+}

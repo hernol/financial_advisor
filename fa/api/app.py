@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from fa.api import alerts, portfolio, tickers
+from fa.api import alerts, analysis, portfolio, tickers
 from fa.api.deps import close_database, open_database
 
 logger = logging.getLogger(__name__)
@@ -51,13 +51,20 @@ def create_app(*, serve_web: bool = True) -> FastAPI:
     app.include_router(tickers.router)
     app.include_router(portfolio.router)
     app.include_router(alerts.router)
+    app.include_router(analysis.router)
 
     if serve_web and WEB_ROOT.is_dir():
         app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
 
         @app.get("/", include_in_schema=False)
         def index() -> HTMLResponse:
-            return HTMLResponse(render_index())
+            # The page names its assets by content hash, so those can be cached
+            # hard — but the page itself has to be revalidated every time or the
+            # browser keeps serving an old shell that points at old hashes, and
+            # a shipped change never reaches anybody.
+            return HTMLResponse(
+                render_index(), headers={"Cache-Control": "no-cache, must-revalidate"}
+            )
 
         @app.get("/manifest.webmanifest", include_in_schema=False)
         def manifest() -> FileResponse:

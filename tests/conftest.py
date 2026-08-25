@@ -68,6 +68,17 @@ def no_network_market():
     deps.set_market_factory(None)
 
 
+@pytest.fixture(autouse=True)
+def clean_jobs():
+    """The analysis job registry is process-wide; a leftover job from one test
+    would look like a real one to the next."""
+    from fa.api import analysis
+
+    analysis.reset_jobs()
+    yield
+    analysis.reset_jobs()
+
+
 @pytest.fixture()
 def conn(tmp_path):
     """A migrated, empty database on whichever engine is under test."""
