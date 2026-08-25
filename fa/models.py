@@ -5,6 +5,11 @@ from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from typing import Any, Mapping, Sequence
 
+# Letters, digits, dot and dash: every real symbol fits, and nothing that could
+# be mistaken for markup does. The dashboard escapes anyway; this keeps the bad
+# value out of the database in the first place.
+TICKER_PATTERN = r"^[A-Za-z0-9.\-]{1,12}$"
+
 BUY = "buy"
 SELL = "sell"
 SPLIT = "split"

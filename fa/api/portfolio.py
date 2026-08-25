@@ -177,7 +177,7 @@ def transactions(
 class TransactionRequest(BaseModel):
     """One ledger entry. Which fields matter depends on the kind."""
 
-    ticker: str = Field(min_length=1, max_length=12)
+    ticker: str = Field(min_length=1, max_length=12, pattern=models.TICKER_PATTERN)
     kind: str
     trade_date: date
     quantity: float | None = Field(default=None, gt=0)
@@ -286,7 +286,9 @@ class TransactionPatch(BaseModel):
     """The fields a correction may change. Everything is optional: what is not
     sent keeps the value it had."""
 
-    ticker: str | None = Field(default=None, min_length=1, max_length=12)
+    ticker: str | None = Field(
+        default=None, min_length=1, max_length=12, pattern=models.TICKER_PATTERN
+    )
     kind: str | None = None
     trade_date: date | None = None
     quantity: float | None = Field(default=None, gt=0)

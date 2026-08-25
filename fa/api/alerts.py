@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Mapping
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from pydantic import BaseModel, Field
 
 from fa.alerts import authoring, kinds
@@ -22,6 +22,7 @@ from fa.api.auth import SUPABASE, Principal, account_id, current_principal, mode
 from fa.api.deps import get_db
 from fa.config import load_settings
 from fa.errors import ValidationError
+from fa.models import TICKER_PATTERN
 from fa.store import alerts as alerts_store
 from fa.store import events as events_store
 from fa.store import history as history_store
@@ -130,8 +131,8 @@ def _choices(key: str) -> Mapping[str, list[str]]:
 
 @router.post("/tickers/{ticker}/alerts", status_code=201)
 def create_alert(
-    ticker: str,
     body: AlertRequest,
+    ticker: str = Path(pattern=TICKER_PATTERN),
     db: Database = Depends(get_db),
     account: int = Depends(account_id),
 ) -> dict[str, Any]:

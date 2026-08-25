@@ -159,12 +159,12 @@ async function loadList() {
     li.className = 'row';
     li.tabIndex = 0;
     li.setAttribute('role', 'button');
-    li.setAttribute('aria-label', `${row.ticker}, ver detalle`);
+    li.setAttribute('aria-label', `${row.ticker}, ver detalle`);  // setAttribute escapes
     const alerts = row.active_alerts
       ? `<span>${row.active_alerts} alerta${row.active_alerts > 1 ? 's' : ''}</span>` : '';
     li.innerHTML = `
       <div class="row-top">
-        <span class="sym">${row.ticker}</span>
+        <span class="sym">${escapeHtml(row.ticker)}</span>
         <span class="row-price tnum">${money(row.price)}</span>
       </div>
       <div class="row-meta">
@@ -174,7 +174,8 @@ async function loadList() {
           ${alerts}
           ${row.positions ? '<span>en cartera</span>' : ''}
         </span>
-        ${row.trend ? `<span class="chip ${row.trend}">${row.trend}</span>` : ''}
+        ${row.trend ? `<span class="chip ${safeClass(row.trend, TREND_CLASSES, 'neutral')}">${
+          escapeHtml(row.trend)}</span>` : ''}
       </div>`;
     const open = () => showDetail(row.ticker);
     li.addEventListener('click', open);
@@ -225,10 +226,11 @@ function renderHead(detail) {
 
   const trend = detail.indicators.trend;
   $('d-trend').textContent = trend || '';
-  $('d-trend').className = `chip solid ${trend || 'neutral'}`;
+  $('d-trend').className = `chip solid ${safeClass(trend, TREND_CLASSES, 'neutral')}`;
   $('d-trend').hidden = !trend;
 
   const c = detail.coverage;
+  // textContent, so no escaping needed and none pretended.
   $('d-coverage').textContent =
     `${c.sessions} ruedas · ${c.first_day} → ${c.last_day} · lectura ${ago(detail.taken_at)}`;
 }
@@ -265,7 +267,7 @@ function renderStats(ind) {
       // Dónde cae el RSI dentro de 0-100, sin gastar una fila de la grilla.
       gauge = `<div class="gauge"><i style="width:${Math.max(2, Math.min(100, value))}%"></i></div>`;
     }
-    box.innerHTML = `<dt>${label}</dt><dd class="${cls}">${fmt(value)}</dd>${gauge}`;
+    box.innerHTML = `<dt>${label}</dt><dd class="${cls}">${escapeHtml(fmt(value))}</dd>${gauge}`;
     dl.appendChild(box);
   }
 
@@ -274,7 +276,7 @@ function renderStats(ind) {
     if (rs[window] == null) continue;
     const box = document.createElement('div');
     box.className = 'stat';
-    box.innerHTML = `<dt>vs ${ind.benchmark} ${window}</dt>`
+    box.innerHTML = `<dt>vs ${escapeHtml(ind.benchmark)} ${window}</dt>`
       + `<dd class="${rs[window] >= 0 ? 'up' : 'down'}">${signed(rs[window], 1)}p</dd>`;
     dl.appendChild(box);
   }
@@ -420,13 +422,13 @@ async function loadAlerts() {
   }
   for (const a of alerts) {
     const params = Object.entries(a.params)
-      .map(([k, v]) => `<b>${k} ${v}</b>`).join('');
+      .map(([k, v]) => `<b>${escapeHtml(k)} ${escapeHtml(v)}</b>`).join('');
     const [tone, text] = OUTCOME[a.last_outcome] || ['neutral', 'sin evaluar'];
     const li = document.createElement('li');
     li.className = `alert ${a.active ? 'is-on' : 'is-off'}`;
     li.innerHTML = `
       <div class="row-top">
-        <span class="alert-name">${a.kind}</span>
+        <span class="alert-name">${escapeHtml(a.kind)}</span>
         <span class="chip ${a.active ? 'on' : 'off'}">${a.active ? 'activa' : 'inactiva'}</span>
       </div>
       <div class="params">${params}</div>
@@ -465,15 +467,17 @@ async function loadAlerts() {
   }
   for (const e of events) {
     const li = document.createElement('li');
-    li.className = `alert event ${e.severity}`;
+    li.className = `alert event ${safeClass(e.severity, SEVERITY_CLASSES, 'info')}`;
     li.innerHTML = `
       <div class="row-top">
-        <span class="alert-name">${e.title}</span>
-        <span class="chip ${e.severity}">${e.severity}</span>
+        <span class="alert-name">${escapeHtml(e.title)}</span>
+        <span class="chip ${safeClass(e.severity, SEVERITY_CLASSES, 'info')}">${
+          escapeHtml(e.severity)}</span>
       </div>
       <div class="row-meta">
         <span>${ago(e.fired_at)}</span>
-        <span>${e.delivered.length ? `enviado por ${e.delivered.join(', ')}` : 'no entregado'}</span>
+        <span>${e.delivered.length
+          ? `enviado por ${escapeHtml(e.delivered.join(', '))}` : 'no entregado'}</span>
       </div>
       ${e.acknowledged_at ? '' : '<div class="alert-actions">'
         + '<button class="mini" data-act="ack">Marcar visto</button></div>'}`;
@@ -618,20 +622,27 @@ function field(name, label, { type = 'text', value = '', options = null, hint = 
   const wrap = document.createElement('div');
   wrap.className = 'f';
   const id = `f-${name}`;
+  // The value can be a ticker or a note the user typed, and it lands inside a
+  // quoted attribute, so it is escaped like everything else. Option labels come
+  // from the alert catalogue, which is ours, but escaping them costs nothing
+  // and means nobody has to check where a label came from.
+  const v = escapeHtml(value);
   const control = options
     ? `<select id="${id}" name="${name}">${options.map((o) => {
-        const [v, text] = Array.isArray(o) ? o : [o, o];
-        return `<option value="${v}"${String(v) === String(value) ? ' selected' : ''}>${text}</option>`;
+        const [raw, text] = Array.isArray(o) ? o : [o, o];
+        const selected = String(raw) === String(value) ? ' selected' : '';
+        return `<option value="${escapeHtml(raw)}"${selected}>${escapeHtml(text)}</option>`;
       }).join('')}</select>`
     : type === 'textarea'
-      ? `<textarea id="${id}" name="${name}">${value}</textarea>`
-      : `<input id="${id}" name="${name}" type="${type}" value="${value}"
-           ${step ? `step="${step}"` : ''} ${min != null ? `min="${min}"` : ''}
+      ? `<textarea id="${id}" name="${name}">${v}</textarea>`
+      : `<input id="${id}" name="${name}" type="${escapeHtml(type)}" value="${v}"
+           ${step ? `step="${escapeHtml(step)}"` : ''} ${min != null ? `min="${escapeHtml(min)}"` : ''}
            ${required ? 'required' : ''} ${type === 'text' ? 'autocapitalize="characters"' : ''}>`;
-  wrap.innerHTML = `<label for="${id}">${label}</label>${control}`
-    + (hint ? `<span class="hint">${hint}</span>` : '');
+  wrap.innerHTML = `<label for="${id}">${escapeHtml(label)}</label>${control}`
+    + (hint ? `<span class="hint">${escapeHtml(hint)}</span>` : '');
   return wrap;
 }
+
 
 function formValues() {
   const out = {};
@@ -871,11 +882,12 @@ function renderPortfolioHead(p) {
   // Being told a total is short a position matters more than the total.
   const notes = [];
   if (p.unpriced.length) {
-    notes.push(`Sin precio guardado para ${p.unpriced.join(', ')}: no entran en el total. `
+    notes.push(`Sin precio guardado para ${escapeHtml(p.unpriced.join(', '))}: no entran en el total. `
       + 'Corré check-alerts para traer sus velas.');
   }
   if ((p.foreign_currency || []).length) {
-    const which = p.foreign_currency.map((f) => `${f.ticker} (${f.currency})`).join(', ');
+    const which = p.foreign_currency
+      .map((f) => `${escapeHtml(f.ticker)} (${escapeHtml(f.currency)})`).join(', ');
     notes.push(`La cartera se valúa en ${p.base_currency}, y ${which} no cotiza en esa `
       + 'moneda: queda afuera del total.');
   }
@@ -921,7 +933,7 @@ function renderHoldings(p) {
 
     li.innerHTML = `
       <div class="row-top">
-        <span class="sym">${h.ticker}</span>
+        <span class="sym">${escapeHtml(h.ticker)}</span>
         <span class="value tnum">${h.value == null ? 'sin precio' : money(h.value)}</span>
       </div>
       <div class="row-meta">
@@ -993,7 +1005,7 @@ function renderLedger(txs) {
   }
   for (const t of txs) {
     const li = document.createElement('li');
-    li.className = `tx ${t.kind}`;
+    li.className = `tx ${safeClass(t.kind, TX_CLASSES)}`;
     // A cash dividend carries an amount and no share count; printing a price
     // of "—" next to it reads as missing data instead of not applicable.
     let detail = '';
@@ -1004,7 +1016,8 @@ function renderLedger(txs) {
     const fee = t.fees ? `comisión ${money(t.fees)}` : '';
     li.innerHTML = `
       <div class="tx-top">
-        <span class="tx-kind">${t.ticker} · ${KIND_LABEL[t.kind] || t.kind}</span>
+        <span class="tx-kind">${escapeHtml(t.ticker)} · ${
+          escapeHtml(KIND_LABEL[t.kind] || t.kind)}</span>
         <span class="tx-cash ${t.cash_flow > 0 ? 'in' : 'out'}">${
           t.cash_flow ? signed(t.cash_flow) : ''}</span>
       </div>
@@ -1058,14 +1071,16 @@ function renderSuggestions(rows) {
   for (const s of rows) {
     const li = document.createElement('li');
     li.className = `suggestion${s.actionable ? '' : ' advice'}`;
-    const params = Object.entries(s.params).map(([k, v]) => `<b>${k} ${v}</b>`).join('');
+    const params = Object.entries(s.params)
+      .map(([k, v]) => `<b>${escapeHtml(k)} ${escapeHtml(v)}</b>`).join('');
     li.innerHTML = `
       <div class="row-top">
-        <span class="alert-name">${s.headline}</span>
-        <span class="priority ${s.priority}">${PRIORITY_LABEL[s.priority] || s.priority}</span>
+        <span class="alert-name">${escapeHtml(s.headline)}</span>
+        <span class="priority ${safeClass(s.priority, PRIORITY_CLASSES, 'low')}">${
+          escapeHtml(PRIORITY_LABEL[s.priority] || s.priority)}</span>
       </div>
       ${params ? `<div class="params">${params}</div>` : ''}
-      <p class="why">${s.rationale}</p>
+      <p class="why">${escapeHtml(s.rationale)}</p>
       <div class="alert-actions">
         ${s.actionable ? '<button class="mini" data-act="accept">Crear alerta</button>' : ''}
         <button class="mini" data-act="reject">${s.actionable ? 'Descartar' : 'Listo'}</button>
@@ -1105,21 +1120,39 @@ function renderReports(rows) {
     details.className = 'report';
     if (index === 0) details.open = true;
     details.innerHTML = `
-      <summary><span>${r.created_at.slice(0, 16).replace('T', ' ')}</span>
-        <span>${r.model}</span></summary>
+      <summary><span>${escapeHtml(r.created_at.slice(0, 16).replace('T', ' '))}</span>
+        <span>${escapeHtml(r.model)}</span></summary>
       <div class="body">${renderReportBody(r.report)}</div>
       <p class="prov">${escapeHtml(r.provenance)}</p>`;
     box.appendChild(details);
   });
 }
 
-// The report is model output rendered into the page, so it is escaped first: a
-// stray < in a number would eat the rest of the paragraph at best.
-function escapeHtml(text) {
-  const node = document.createElement('div');
-  node.textContent = text || '';
-  return node.innerHTML;
+// Everything that reaches innerHTML goes through this first.
+//
+// Two sources of untrusted text meet here. Tickers and notes are typed by a
+// person, and the AI's rationale is free text from a model that was shown
+// whatever the user pasted as context — a prompt injection in that paste comes
+// straight back out here. And because the session token lives in localStorage,
+// script running on this page can walk off with the credential.
+//
+// Quotes are encoded too: the textContent trick does not, so it cannot protect
+// an attribute, which is where the priority class was going.
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ESCAPES[c]);
 }
+
+/** A class name taken from data: only ever one of a known set. */
+function safeClass(value, allowed, fallback = '') {
+  return allowed.includes(value) ? value : fallback;
+}
+
+const TREND_CLASSES = ['alcista', 'bajista'];
+const SEVERITY_CLASSES = ['info', 'warning', 'critical'];
+const PRIORITY_CLASSES = ['high', 'medium', 'low'];
+const TX_CLASSES = ['buy', 'sell', 'dividend', 'split', 'fee'];
 
 // Just enough markdown to make the report readable. Applied *after* escaping,
 // so the only tags that can reach the DOM are the ones written here.

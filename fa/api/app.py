@@ -59,11 +59,15 @@ def create_app(*, serve_web: bool = True) -> FastAPI:
         @app.get("/", include_in_schema=False)
         def index() -> HTMLResponse:
             # The page names its assets by content hash, so those can be cached
-            # hard — but the page itself has to be revalidated every time or the
-            # browser keeps serving an old shell that points at old hashes, and
-            # a shipped change never reaches anybody.
+            # hard — but the page itself must never be, or the browser keeps
+            # serving an old shell pointing at old hashes and a shipped change
+            # reaches nobody. no-store rather than no-cache: this response
+            # carries no validator, so no-cache leaves the browser free to apply
+            # heuristic freshness, which is exactly how a stale shell survives.
+            # It is a few kilobytes; correctness is worth the round trip.
             return HTMLResponse(
-                render_index(), headers={"Cache-Control": "no-cache, must-revalidate"}
+                render_index(),
+                headers={"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"},
             )
 
         @app.get("/manifest.webmanifest", include_in_schema=False)
