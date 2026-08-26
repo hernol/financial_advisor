@@ -67,7 +67,7 @@ let signingIn = false;
 
 const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi',
-  period: 'annual', curveDays: 0, charts: {}, kinds: null,
+  period: 'annual', curveDays: 0, txLimit: 12, charts: {}, kinds: null,
 };
 
 // The equity curve is a calendar series, not a series of sessions, so its
@@ -920,7 +920,7 @@ async function loadPortfolio() {
   const [p, curve, txs] = await Promise.all([
     api('/api/portfolio'),
     api(`/api/portfolio/history?days=${state.curveDays || 3650}`),
-    api('/api/portfolio/transactions?limit=12'),
+    api(`/api/portfolio/transactions?limit=${state.txLimit}`),
   ]);
 
   $('p-empty').hidden = p.count > 0 || txs.length > 0;
@@ -1014,7 +1014,29 @@ function renderHoldings(p) {
         <span class="weight-bar"><i style="width:${Math.max(2, h.weight_pct || 0)}%"></i></span>
         <span class="weight-pct">${h.weight_pct == null ? '—' : `${num(h.weight_pct, 0)}%`}</span>
       </div>
-      ${day ? `<div class="row-meta">${day}</div>` : ''}`;
+      <div class="row-meta">
+        <span>${day}</span>
+        <button class="mini danger" data-act="remove"
+                aria-label="Quitar ${escapeHtml(h.ticker)} de la cartera">
+          <svg aria-hidden="true"><use href="#i-trash"/></svg>
+        </button>
+      </div>`;
+
+    li.querySelector('[data-act="remove"]').addEventListener('click', async (event) => {
+      // Inside a card that opens the ticker: the click must not do both.
+      event.stopPropagation();
+      const count = h.entries === 1 ? 'su movimiento' : `sus ${h.entries} movimientos`;
+      if (!confirm(
+        `¿Quitar ${h.ticker} de la cartera?\n\n`
+        + `Se retiran ${count}. Quedan guardados en el historial y las velas del `
+        + 'papel no se borran.'
+      )) return;
+      try {
+        await send(`/api/portfolio/holdings/${h.ticker}`, 'DELETE');
+        showOk(`${h.ticker} salió de la cartera.`);
+        await loadPortfolio();
+      } catch (e) { showError(e.message); }
+    });
 
     const open = () => showDetail(h.ticker);
     li.addEventListener('click', open);
@@ -1088,9 +1110,20 @@ function renderCurve(curve) {
     + '<span class="hint-inline">arrastrá para acercar · doble clic para volver</span>';
 }
 
-function renderLedger(txs) {
+function renderLedger(ledgerPage) {
+  const txs = ledgerPage.entries;
   const list = $('tx-list');
   list.innerHTML = '';
+
+  // Say what is not on screen. A list cut at a limit with nothing to say so is
+  // how a movement goes missing and reads as a bug.
+  const hidden = ledgerPage.total - ledgerPage.shown;
+  $('tx-count').textContent = hidden > 0
+    ? `${ledgerPage.shown} de ${ledgerPage.total}` : `${ledgerPage.total}`;
+  const more = $('tx-more');
+  more.hidden = hidden <= 0;
+  more.textContent = `Ver los ${hidden} restantes`;
+
   if (!txs.length) {
     list.innerHTML = '<li class="notice">El libro mayor está vacío.</li>';
     return;
@@ -1584,6 +1617,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('add-tx').addEventListener('click', () => openTransactionForm());
+  $('tx-more').addEventListener('click', () => {
+    state.txLimit = 500;
+    loadPortfolio().catch((e) => showError(e.message));
+  });
   $('ask-ai').addEventListener('click', openReportForm);
   $('check-now').addEventListener('click', checkNow);
   $('add-alert').addEventListener('click', () => {

@@ -150,32 +150,43 @@ def transactions(
     limit: int = Query(50, ge=1, le=500),
     db: Database = Depends(get_db),
     account: int = Depends(account_id),
-) -> list[dict[str, Any]]:
-    """The ledger, newest first: what was bought, sold, split and collected."""
+) -> dict[str, Any]:
+    """The ledger, newest first.
+
+    Returns the total alongside the page. A list cut off at a limit with no
+    sign that it was cut is how an entry goes missing without anybody being
+    told — which is exactly what happened to a holding whose only movement was
+    the oldest one.
+    """
     from fa.store import transactions as transactions_store
 
     entries = transactions_store.list_transactions(db, account_id=account)
     entries.reverse()
-    return [
-        {
-            "id": e.id,
-            "ticker": e.ticker,
-            "kind": e.kind,
-            "trade_date": e.trade_date.isoformat() if e.trade_date else None,
-            "quantity": e.quantity,
-            "price": e.price,
-            "amount": e.amount,
-            "ratio": e.ratio,
-            "fees": e.fees,
-            "currency": e.currency,
-            "cash_flow": e.cash_flow,
-            "note": e.note,
-            "source": e.source,
-            "replaces_id": e.replaces_id,
-            "corrected": e.source == "correction",
-        }
-        for e in entries[:limit]
-    ]
+    page = entries[:limit]
+    return {
+        "total": len(entries),
+        "shown": len(page),
+        "entries": [
+            {
+                "id": e.id,
+                "ticker": e.ticker,
+                "kind": e.kind,
+                "trade_date": e.trade_date.isoformat() if e.trade_date else None,
+                "quantity": e.quantity,
+                "price": e.price,
+                "amount": e.amount,
+                "ratio": e.ratio,
+                "fees": e.fees,
+                "currency": e.currency,
+                "cash_flow": e.cash_flow,
+                "note": e.note,
+                "source": e.source,
+                "replaces_id": e.replaces_id,
+                "corrected": e.source == "correction",
+            }
+            for e in page
+        ],
+    }
 
 
 class TransactionRequest(BaseModel):
@@ -348,6 +359,29 @@ def amend_transaction(
         "fees": corrected.fees,
         "cash_flow": corrected.cash_flow,
     }
+
+
+@router.delete("/holdings/{ticker}")
+def remove_holding(
+    ticker: str,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Take a ticker out of the portfolio entirely.
+
+    Retires every ledger entry it has rather than asking the person to find and
+    remove each one. Soft, so the history keeps what happened; the equity curve
+    is derived from the live entries, so the past stops counting it too.
+    """
+    from fa.store import transactions as transactions_store
+
+    symbol = ticker.upper()
+    retired = transactions_store.retire_ticker(db, symbol, account_id=account)
+    if not retired:
+        raise HTTPException(
+            status_code=404, detail=f"{symbol} no tiene movimientos en la cartera."
+        )
+    return {"ticker": symbol, "retired": retired}
 
 
 @router.delete("/transactions/{transaction_id}", status_code=204)

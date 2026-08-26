@@ -315,7 +315,7 @@ def test_an_alert_of_another_account_cannot_be_deleted(two_accounts, client, con
 def test_a_ledger_entry_of_another_account_cannot_be_deleted(two_accounts, client, conn):
     theirs = client.get(
         "/api/portfolio/transactions", headers=two_accounts["user-2"]
-    ).json()[0]
+    ).json()["entries"][0]
     assert client.delete(
         f"/api/portfolio/transactions/{theirs['id']}", headers=two_accounts["user-1"]
     ).status_code == 404

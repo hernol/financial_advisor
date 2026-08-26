@@ -179,6 +179,9 @@ Eso tiene tres consecuencias prácticas:
   160 a 100), pero la compra original sigue entera en el libro. Antes se pisaba y no había
   vuelta atrás.
 - **Borrar es lógico.** Sacar un movimiento lo quita del cálculo y lo deja registrado.
+- **Un papel entero se saca de una.** Cada tenencia tiene su tacho: retira todos sus
+  movimientos juntos, para cuando cargaste algo mal —la cantidad equivocada, o un precio de
+  otro instrumento— y lo que querés es que el papel no esté. Las velas descargadas quedan.
 
 Desde el dashboard también se cargan movimientos, incluidos dividendos y comisiones, que por
 CLI todavía no tienen comando propio. **Da igual por dónde cargues**: la terminal y la app

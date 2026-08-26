@@ -192,16 +192,17 @@ def test_stored_valuations_are_not_what_the_curve_reads(client, conn):
 def test_the_ledger_lists_newest_first(client, conn):
     buy(conn, ticker="AAA", day=date(2026, 1, 10))
     buy(conn, ticker="BBB", day=date(2026, 5, 20))
-    rows = client.get("/api/portfolio/transactions").json()
-    assert [r["ticker"] for r in rows] == ["BBB", "AAA"]
-    assert rows[0]["kind"] == "buy"
-    assert rows[0]["cash_flow"] < 0
+    body = client.get("/api/portfolio/transactions").json()
+    assert body["total"] == 2
+    assert [r["ticker"] for r in body["entries"]] == ["BBB", "AAA"]
+    assert body["entries"][0]["kind"] == "buy"
+    assert body["entries"][0]["cash_flow"] < 0
 
 
 def test_a_split_shows_up_in_the_ledger_with_its_ratio(client, conn):
     position = buy(conn, quantity=10.0, price=400.0)
     positions_store.apply_split(conn, position.id, 4.0)
-    kinds = {r["kind"]: r for r in client.get("/api/portfolio/transactions").json()}
+    kinds = {r["kind"]: r for r in client.get("/api/portfolio/transactions").json()["entries"]}
     assert kinds["split"]["ratio"] == 4.0
     # The purchase that a split used to overwrite is still on file.
     assert kinds["buy"]["price"] == 400.0
@@ -212,3 +213,27 @@ def test_the_portfolio_never_calls_a_provider(client, conn):
     bars(conn)
     for path in ("/api/portfolio", "/api/portfolio/history", "/api/portfolio/transactions"):
         assert client.get(path).status_code == 200, path
+
+
+def test_a_truncated_ledger_says_how_many_there_are(client, conn):
+    """A list cut off with no sign it was cut is how an entry goes missing
+    without anybody being told."""
+    for day in range(1, 6):
+        buy(conn, ticker=f"T{day}", day=date(2026, 8, day))
+    body = client.get("/api/portfolio/transactions?limit=2").json()
+    assert body["total"] == 5
+    assert body["shown"] == 2
+    assert len(body["entries"]) == 2
+
+
+def test_the_oldest_entry_is_reachable(client, conn):
+    """The one that was cut off: a holding whose only movement was the oldest."""
+    buy(conn, ticker="OLD", day=date(2026, 1, 5))
+    for day in range(1, 6):
+        buy(conn, ticker=f"T{day}", day=date(2026, 8, day))
+    small = client.get("/api/portfolio/transactions?limit=3").json()
+    assert "OLD" not in [r["ticker"] for r in small["entries"]]
+    assert small["total"] == 6
+
+    everything = client.get("/api/portfolio/transactions?limit=100").json()
+    assert "OLD" in [r["ticker"] for r in everything["entries"]]

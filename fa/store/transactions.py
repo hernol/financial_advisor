@@ -196,3 +196,29 @@ def history_of(
             break
         current = get_transaction(conn, current.replaces_id, account_id=account_id)
     return chain
+
+def retire_ticker(
+    conn: Database, ticker: str, *, account_id: int = LOCAL_ACCOUNT_ID
+) -> int:
+    """Retire every live entry for a ticker. Returns how many were retired.
+
+    For the case the per-entry delete handles badly: a holding loaded wrong —
+    the wrong quantity, a price from a different instrument — where what you
+    want is the ticker gone, not a hunt through the ledger for its rows.
+
+    Soft, like every other delete here: the entries leave the calculation and
+    stay in the history.
+    """
+    symbol = ticker.upper()
+    stamp = to_iso(datetime.now(timezone.utc))
+    cur = conn.execute(
+        "UPDATE transactions SET deleted_at = ?, updated_at = ? "
+        "WHERE ticker = ? AND account_id = ? AND deleted_at IS NULL",
+        (stamp, stamp, symbol, account_id),
+    )
+    conn.commit()
+    if cur.rowcount:
+        from fa.store import positions as positions_store
+
+        positions_store.sync_from_ledger(conn, symbol, account_id=account_id)
+    return cur.rowcount
