@@ -263,3 +263,55 @@ def test_a_deleted_entry_leaves_the_rollup_but_stays_on_file(client, conn):
 
 def test_removing_a_missing_entry_is_a_404(client):
     assert client.delete("/api/portfolio/transactions/999").status_code == 404
+
+
+# --- refreshing prices on demand -------------------------------------------
+
+
+def test_refreshing_a_ticker_is_accepted(client, conn):
+    bars(conn)
+    assert client.post("/api/tickers/PODD/refresh").json() == {
+        "ticker": "PODD", "status": "running"
+    }
+
+
+def test_refreshing_reaches_the_provider_even_with_prices_on_file(client, conn, monkeypatch):
+    """A refresh must force. Without it the warm helper short-circuits on the
+    bars already stored and the button would do nothing at all."""
+    bars(conn)
+    seen = {}
+
+    def fake_warm(db, market, ticker, *, force=False):
+        seen["ticker"] = ticker
+        seen["force"] = force
+        return True
+
+    monkeypatch.setattr("fa.warm.warm", fake_warm)
+    client.post("/api/tickers/podd/refresh")
+    assert seen == {"ticker": "PODD", "force": True}
+
+
+def test_refreshing_does_not_evaluate_alerts(client, conn, monkeypatch):
+    """Distinct from /check on purpose: asking for a fresher number must not be
+    able to fire an alert and send a notification."""
+    bars(conn)
+    position = buy(conn)
+    alerts_store.add_alert(
+        conn,
+        Alert(ticker="PODD", kind=kinds.PCT_UP, params={"pct": 1, "reference": "buy"},
+              position_id=position.id),
+    )
+    monkeypatch.setattr("fa.warm.warm", lambda *a, **k: True)
+
+    def explode(*args, **kwargs):
+        raise AssertionError("un refresh no debe correr el motor de alertas")
+
+    monkeypatch.setattr("fa.alerts.engine.run_checks", explode)
+    assert client.post("/api/tickers/PODD/refresh").status_code == 202
+    assert events_store.recent_events(conn, limit=5) == []
+
+
+def test_a_refresh_that_cannot_reach_a_provider_does_not_kill_the_worker(client, conn):
+    """The autouse market refuses every call; the endpoint still answers."""
+    bars(conn)
+    assert client.post("/api/tickers/PODD/refresh").status_code == 202

@@ -612,6 +612,20 @@ al que se mueve un balance.
 Si la deuda neta de algún período es estimada —porque el proveedor no reportó deuda total y
 caja— la pantalla lo dice arriba: esa estimación se propaga al EV y a su yield.
 
+### Actualizar el precio de un papel
+
+Debajo del precio dice de cuándo es la lectura —`lectura hace 22 min`— y al lado hay
+**Actualizar**. La app nunca sale a buscar precios sola al abrir una pantalla: lee lo que hay
+guardado, que es lo que evita que mirar la cartera dispare una ronda de descargas. Ese botón
+es el pedido explícito.
+
+Trae velas e indicadores de ese ticker y nada más. **No evalúa alertas y no notifica** —para
+eso está *Chequear ahora*, que es otra cosa. Un refresh no debería poder mandarte un mensaje
+al teléfono.
+
+Mientras trabaja, el botón gira y dice *Actualizando…*. Termina cuando la lectura cambia; si
+el proveedor no tiene nada más nuevo, lo dice en lugar de dejarte con el spinner.
+
 En la pestaña *Alertas* hay además **Chequear ahora**, que evalúa las alertas de ese papel sin
 esperar al timer.
 

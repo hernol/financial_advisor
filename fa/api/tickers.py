@@ -405,6 +405,38 @@ def check_now(
     return {"ticker": symbol, "status": "running"}
 
 
+@router.post("/tickers/{ticker}/refresh", status_code=202)
+def refresh_prices(
+    ticker: str,
+    background: BackgroundTasks,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Re-fetch this ticker's prices right now, and nothing else.
+
+    Distinct from ``/check`` on purpose: a check evaluates the alerts and can
+    deliver a notification, which is far more than someone asking for a fresher
+    number wants to set off. This only refills the bars and indicators.
+
+    Asking for it is a write in the sense that matters here — the person asked,
+    so the fetch is theirs, and the "reads never fetch" rule stays intact.
+    """
+    from fa.api.deps import build_market
+    from fa.warm import warm
+
+    symbol = ticker.upper()
+
+    def run() -> None:
+        try:
+            warm(db, build_market(db), symbol, force=True)
+        except Exception:
+            # A provider being down must not kill the worker thread.
+            logger.exception("on-demand refresh of %s failed", symbol)
+
+    background.add_task(run)
+    return {"ticker": symbol, "status": "running"}
+
+
 @router.get("/health")
 def health(db: Database = Depends(get_db),
     account: int = Depends(account_id),

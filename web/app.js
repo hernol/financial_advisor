@@ -309,6 +309,8 @@ function renderHead(detail) {
   // textContent, so no escaping needed and none pretended.
   $('d-coverage').textContent =
     `${c.sessions} ruedas · ${c.first_day} → ${c.last_day} · lectura ${ago(detail.taken_at)}`;
+  // Remembered so the poll below can tell a real refresh from a re-render.
+  state.lastReading = detail.taken_at;
 }
 
 // key, label, formatter, tone: 'signed' colours by sign, 'rsi' adds a gauge.
@@ -1683,6 +1685,41 @@ async function watchReport(attempts = 90) {
   $('ai-status').textContent = 'Sigue corriendo. Volvé a esta pestaña en un rato.';
 }
 
+/** Re-fetch this ticker's price on demand.
+ *
+ * The screen reads stored rows, so a stale reading stays stale until somebody
+ * asks. The fetch runs on the server in the background; this polls the reading
+ * timestamp and stops as soon as it moves, rather than guessing at a delay.
+ */
+async function refreshPrices() {
+  const button = $('d-refresh');
+  const label = button.querySelector('span');
+  const before = state.lastReading;
+  button.disabled = true;
+  button.classList.add('working');
+  label.textContent = 'Actualizando…';
+  try {
+    await send(`/api/tickers/${state.ticker}/refresh`, 'POST');
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 700));
+      await paintDetail(state.ticker);
+      if (state.lastReading !== before) {
+        showOk('Precio actualizado.');
+        return;
+      }
+    }
+    // Not an error: the provider may simply have nothing newer, and saying so
+    // beats a spinner that stops with no explanation.
+    showOk('Sin datos más nuevos por ahora.');
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    button.classList.remove('working');
+    label.textContent = 'Actualizar';
+    button.disabled = false;
+  }
+}
+
 async function checkNow() {
   const button = $('check-now');
   button.disabled = true;
@@ -1795,6 +1832,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   $('ask-ai').addEventListener('click', openReportForm);
   $('check-now').addEventListener('click', checkNow);
+  $('d-refresh').addEventListener('click', refreshPrices);
   $('add-alert').addEventListener('click', () => {
     openAlertForm(state.ticker).catch((e) => showError(e.message));
   });

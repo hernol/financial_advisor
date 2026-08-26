@@ -1081,3 +1081,24 @@ table.grid td.down { color: var(--down); }
    shares — a different kind of event, so a different edge. */
 .tx.deposit { border-left-color: var(--accent); }
 .tx.withdraw { border-left-color: var(--warn); }
+
+/* A quiet action that sits inside a line of text: it has to be reachable
+   without competing with the reading it belongs to. */
+.linkish {
+  background: none;
+  border: 0;
+  padding: 8px 4px;          /* keeps the 44px target without a visible box */
+  min-height: 44px;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.linkish svg { width: 14px; height: 14px; fill: currentColor; }
+.linkish:disabled { color: var(--muted); cursor: default; }
+.linkish.working svg { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .linkish.working svg { animation: none; }
+}
