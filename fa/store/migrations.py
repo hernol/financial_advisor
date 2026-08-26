@@ -526,6 +526,58 @@ CREATE TABLE IF NOT EXISTS fundamental_snapshots (
 """
 
 
+# --- v13: cash movements ----------------------------------------------------
+# Deposits and withdrawals have no ticker. SQLite cannot drop a NOT NULL in
+# place, so the table is rebuilt; Postgres says it in one statement.
+
+_TRANSACTIONS_V13 = """
+CREATE TABLE transactions_v13 (
+    id          {ID_PK},
+    account_id  {FK_ID} NOT NULL DEFAULT 1 REFERENCES accounts(id) ON DELETE CASCADE,
+    position_id {FK_ID} REFERENCES positions(id) ON DELETE SET NULL,
+    ticker      TEXT,
+    kind        TEXT NOT NULL,
+    trade_date  TEXT NOT NULL,
+    quantity    {REAL},
+    price       {REAL},
+    amount      {REAL},
+    ratio       {REAL},
+    fees        {REAL} NOT NULL DEFAULT 0,
+    currency    TEXT NOT NULL DEFAULT 'USD',
+    note        TEXT NOT NULL DEFAULT '',
+    source      TEXT NOT NULL DEFAULT 'manual',
+    replaces_id {FK_ID},
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    deleted_at  TEXT
+);
+"""
+
+_TX_COLUMNS = (
+    "id, account_id, position_id, ticker, kind, trade_date, quantity, price, amount, "
+    "ratio, fees, currency, note, source, replaces_id, created_at, updated_at, deleted_at"
+)
+
+
+def _migrate_cash_movements(db: Database) -> None:
+    if db.dialect.name != SQLITE:
+        db.execute("ALTER TABLE transactions ALTER COLUMN ticker DROP NOT NULL")
+        return
+    db.execute(render_ddl(_TRANSACTIONS_V13, db.dialect))
+    db.execute(
+        f"INSERT INTO transactions_v13({_TX_COLUMNS}) SELECT {_TX_COLUMNS} FROM transactions"
+    )
+    db.execute("DROP TABLE transactions")
+    db.execute("ALTER TABLE transactions_v13 RENAME TO transactions")
+    for name, definition in (
+        ("idx_tx_ticker", "transactions(account_id, ticker, trade_date)"),
+        ("idx_tx_position", "transactions(position_id)"),
+        ("idx_tx_updated", "transactions(updated_at)"),
+        ("idx_tx_replaces", "transactions(replaces_id)"),
+    ):
+        db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {definition}")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "transaction ledger", _migrate_ledger, sqlite_only=True),
     Migration(4, "drop destructive cascades", _migrate_no_cascade, sqlite_only=True),
@@ -537,6 +589,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(10, "accounts and the account_id column", _migrate_tenancy),
     Migration(11, "corrections point at what they replace", _migrate_corrections),
     Migration(12, "store the fundamental tables", _script(_FUNDAMENTALS)),
+    Migration(13, "cash movements have no ticker", _migrate_cash_movements),
 )
 
 TARGET_VERSION = max(m.version for m in MIGRATIONS)

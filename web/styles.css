@@ -1076,3 +1076,8 @@ table.grid td.down { color: var(--down); }
   margin-bottom: var(--s3);
 }
 .curve-controls .ranges { margin-bottom: 0; }
+
+/* Money entering or leaving the account, rather than moving between cash and
+   shares — a different kind of event, so a different edge. */
+.tx.deposit { border-left-color: var(--accent); }
+.tx.withdraw { border-left-color: var(--warn); }

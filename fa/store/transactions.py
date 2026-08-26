@@ -28,7 +28,9 @@ def record(
         (
             account_id,
             transaction.position_id,
-            transaction.ticker.upper(),
+            # Cash movements have none; upper() on nothing would be a crash at
+            # the moment of recording a deposit.
+            transaction.ticker.upper() if transaction.ticker else None,
             transaction.kind,
             to_iso(transaction.trade_date),
             transaction.quantity,
@@ -109,8 +111,9 @@ def soft_delete(
         (stamp, stamp, transaction_id, account_id),
     )
     conn.commit()
-    if cur.rowcount and entry is not None:
+    if cur.rowcount and entry is not None and entry.ticker:
         # The rollup summarises the ledger, so removing an entry has to move it.
+        # A cash movement summarises into no rollup at all.
         from fa.store import positions as positions_store
 
         positions_store.sync_from_ledger(conn, entry.ticker, account_id=account_id)
@@ -118,9 +121,10 @@ def soft_delete(
 
 
 def tickers(conn: Database, *, account_id: int = LOCAL_ACCOUNT_ID) -> list[str]:
+    """Every symbol the ledger mentions. Cash movements name none."""
     rows = conn.execute(
         "SELECT DISTINCT ticker FROM transactions "
-        "WHERE deleted_at IS NULL AND account_id = ? ORDER BY ticker",
+        "WHERE deleted_at IS NULL AND account_id = ? AND ticker IS NOT NULL ORDER BY ticker",
         (account_id,),
     )
     return [row["ticker"] for row in rows]
@@ -177,7 +181,7 @@ def amend(
 
     # A correction that moves the entry to another ticker leaves the old one
     # with one entry fewer, so both rollups have to be rebuilt.
-    for ticker in {original.ticker, stored.ticker}:
+    for ticker in {original.ticker, stored.ticker} - {None}:
         positions_store.sync_from_ledger(conn, ticker, account_id=account_id)
     return stored
 

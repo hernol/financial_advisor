@@ -106,7 +106,12 @@ def portfolio(
     unrealized = market_value - cost_basis if rows else 0.0
     # Everything the ledger did to the cash side: negative while the money is
     # in shares, rising as sales and dividends bring it back.
-    cash = sum(e.cash_flow for e in transactions_store.list_transactions(db, account_id=account))
+    entries = transactions_store.list_transactions(db, account_id=account)
+    cash = sum(e.cash_flow for e in entries)
+    # Once deposits are on file, holdings plus cash is what the account is
+    # worth, not what it earned — a deposit would otherwise read as a gain.
+    # Subtracting what was put in separates the two.
+    put_in = models.contributed(entries)
     return {
         "holdings": rows,
         "count": len(rows),
@@ -117,7 +122,9 @@ def portfolio(
         "pnl_pct": (unrealized / cost_basis * 100.0) if cost_basis else None,
         "realized_pnl": realized,
         "cash": round(cash, 4),
-        "total_result": round(market_value + cash, 4),
+        "contributed": round(put_in, 4),
+        "net_worth": round(market_value + cash, 4),
+        "total_result": round(market_value + cash - put_in, 4),
         "dividends": dividends,
         "fees": fees,
         "unpriced": missing,
@@ -151,7 +158,9 @@ def history(
         # Holdings plus the cash the ledger has produced. Selling moves money
         # from one to the other, so this line does not step down on a sale.
         "cash": [p["cash"] for p in points],
+        "contributed": [p["contributed"] for p in points],
         "total": [p["total"] for p in points],
+        "result": [p["result"] for p in points],
         "pnl_pct": [p["pnl_pct"] for p in points],
     }
 
@@ -205,7 +214,10 @@ def transactions(
 class TransactionRequest(BaseModel):
     """One ledger entry. Which fields matter depends on the kind."""
 
-    ticker: str = Field(min_length=1, max_length=12, pattern=models.TICKER_PATTERN)
+    # Absent for a deposit or a withdrawal, which belong to no symbol.
+    ticker: str | None = Field(
+        default=None, min_length=1, max_length=12, pattern=models.TICKER_PATTERN
+    )
     kind: str
     trade_date: date
     quantity: float | None = Field(default=None, gt=0)
@@ -224,6 +236,8 @@ REQUIRED: dict[str, tuple[str, ...]] = {
     models.SPLIT: ("ratio",),
     models.DIVIDEND: (),
     models.FEE: (),
+    models.DEPOSIT: ("amount",),
+    models.WITHDRAW: ("amount",),
 }
 
 
@@ -261,6 +275,16 @@ def add_transaction(
             status_code=422,
             detail="Un dividendo necesita un monto total o cantidad y precio por acción.",
         )
+    cash_only = body.kind in models.CASH_KINDS
+    if cash_only and body.ticker:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Un {body.kind} es plata que entra o sale de la cuenta, no de un papel.",
+        )
+    if not cash_only and not body.ticker:
+        raise HTTPException(
+            status_code=422, detail=f"Una entrada de tipo '{body.kind}' necesita: ticker."
+        )
     if body.trade_date > date.today():
         raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
     if body.currency.upper() != BASE_CURRENCY:
@@ -290,15 +314,17 @@ def add_transaction(
         account_id=account,
     )
     # The rollup is what the CLI and the alert engine read, so it moves with
-    # the ledger regardless of which client wrote the entry.
-    positions_store.sync_from_ledger(db, entry.ticker, account_id=account)
-
-    # A ticker with no stored prices cannot be valued. Telling the user to go
-    # run a command would be asking them to do the program's job, so the fetch
-    # is queued and the screen fills in when it lands.
-    fetching = not has_prices(db, entry.ticker)
-    if fetching:
-        background.add_task(warm, db, build_market(db), entry.ticker)
+    # the ledger regardless of which client wrote the entry. A cash movement
+    # has no ticker and therefore no rollup and nothing to fetch.
+    fetching = False
+    if entry.ticker:
+        positions_store.sync_from_ledger(db, entry.ticker, account_id=account)
+        # A ticker with no stored prices cannot be valued. Telling the user to
+        # go run a command would be asking them to do the program's job, so the
+        # fetch is queued and the screen fills in when it lands.
+        fetching = not has_prices(db, entry.ticker)
+        if fetching:
+            background.add_task(warm, db, build_market(db), entry.ticker)
 
     return {
         "id": entry.id,
@@ -355,6 +381,11 @@ def amend_transaction(
         raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
     if "ticker" in changes:
         changes["ticker"] = changes["ticker"].upper()
+    if changes.get("kind") in models.CASH_KINDS and changes.get("ticker"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Un {changes['kind']} no lleva ticker.",
+        )
 
     corrected = transactions_store.amend(db, transaction_id, changes, account_id=account)
     if corrected is None:

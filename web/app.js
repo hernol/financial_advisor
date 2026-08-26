@@ -69,7 +69,7 @@ const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi',
   period: 'annual', curveDays: 0, charts: {}, kinds: null,
   // Cartera: which list is on screen and where each one is standing.
-  portfolioTab: 'holdings', holdingPage: 0, txPage: 0, curveView: 'total',
+  portfolioTab: 'holdings', holdingPage: 0, txPage: 0, curveView: 'result',
 };
 
 const PAGE_SIZE = 10;
@@ -106,6 +106,9 @@ const money = (v) => v == null ? '—'
   : v.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const signed = (v, d = 2) => v == null ? '—' : `${v > 0 ? '+' : ''}${v.toFixed(d)}`;
 const num = (v, d = 2) => v == null ? '—' : v.toFixed(d);
+// signed() is for percentages, where four figures never come up. A result in
+// pesos does reach thousands, and reading it wants the separators.
+const signedMoney = (v) => v == null ? '—' : `${v > 0 ? '+' : ''}${money(v)}`;
 
 function ago(iso) {
   if (!iso) return 'nunca';
@@ -809,7 +812,12 @@ async function openAlertForm(ticker) {
 const TX_KINDS = [
   ['buy', 'Compra'], ['sell', 'Venta'], ['dividend', 'Dividendo'],
   ['split', 'Split'], ['fee', 'Comisión'],
+  ['deposit', 'Depósito'], ['withdraw', 'Retiro'],
 ];
+
+// Money entering or leaving the account rather than moving between cash and
+// shares. They have no ticker.
+const CASH_KINDS = ['deposit', 'withdraw'];
 
 function openTransactionForm(ticker = '', existing = null) {
   const today = new Date().toISOString().slice(0, 10);
@@ -836,16 +844,28 @@ function openTransactionForm(ticker = '', existing = null) {
     type: 'number', step: 'any', min: 0, value: v.fees ?? '0',
   });
 
+  // A hidden control still takes part in validation, and the browser refuses to
+  // submit a form whose invalid field it cannot focus — so visibility and
+  // requiredness have to move together. Hiding the ticker for a deposit while
+  // leaving it required silently blocked the save with nothing on screen.
+  const toggle = (wrap, visible, required = false) => {
+    wrap.hidden = !visible;
+    const control = wrap.querySelector('input, select, textarea');
+    if (control) control.required = visible && required;
+  };
+
   // Progressive disclosure: a split has no price and a cash dividend has no
   // share count. Showing every field for every kind invites wrong entries.
   const paint = () => {
     const value = kind.querySelector('select').value;
     const shares = value === 'buy' || value === 'sell';
-    quantity.hidden = !shares;
-    price.hidden = !shares;
-    ratio.hidden = value !== 'split';
-    amount.hidden = !(value === 'dividend' || value === 'fee');
-    fees.hidden = value === 'split';
+    const cash = CASH_KINDS.includes(value);
+    toggle(symbol, !cash, true);
+    toggle(quantity, shares);
+    toggle(price, shares);
+    toggle(ratio, value === 'split');
+    toggle(amount, value === 'dividend' || value === 'fee' || cash, cash);
+    toggle(fees, value !== 'split');
   };
   kind.querySelector('select').addEventListener('change', paint);
   paint();
@@ -864,11 +884,15 @@ function openTransactionForm(ticker = '', existing = null) {
   sheet.open(title, fields, async () => {
       const values = formValues();
       const body = {
-        ticker: values.ticker.toUpperCase(),
         kind: values.kind,
         trade_date: values.trade_date,
         fees: values.fees === '' ? 0 : Number(values.fees),
       };
+      // A deposit carries no symbol, and sending an empty one is not the same
+      // as sending none.
+      if (!CASH_KINDS.includes(values.kind) && values.ticker) {
+        body.ticker = values.ticker.toUpperCase();
+      }
       for (const key of ['quantity', 'price', 'amount', 'ratio']) {
         if (values[key] !== '' && values[key] !== undefined) body[key] = Number(values[key]);
       }
@@ -961,6 +985,7 @@ async function awaitPrices(ticker, attempts = 12) {
 
 const KIND_LABEL = {
   buy: 'compra', sell: 'venta', dividend: 'dividendo', split: 'split', fee: 'comisión',
+  deposit: 'depósito', withdraw: 'retiro',
 };
 
 async function loadPortfolio() {
@@ -1015,11 +1040,15 @@ function renderPortfolioHead(p) {
 // The cash figure is the running sum of what the ledger did to the money side.
 // Negative means it is sitting in shares, which is not a loss — so it is shown
 // as what it is, without the red a signed tone would paint on it.
+// Without deposits recorded, cash is a net rather than a balance and goes
+// negative while the money is in shares — calling that "caja" would be wrong.
 const cashLabel = (value) => (value < 0 ? 'Neto invertido' : 'Caja');
 
 const TOTALS = [
   ['cost_basis', 'Costo', (v) => money(v)],
   ['total_result', 'Resultado', (v) => money(v), 'signed'],
+  ['net_worth', 'Patrimonio', (v) => money(v)],
+  ['contributed', 'Aportado', (v) => money(v)],
   ['cash', cashLabel, (v) => money(Math.abs(v))],
   ['realized_pnl', 'Realizado', (v) => money(v), 'signed'],
   ['dividends', 'Dividendos', (v) => money(v)],
@@ -1122,9 +1151,13 @@ function renderHoldings(p) {
 // tens of thousands, the other the few hundred you are up or down — so they are
 // separate views rather than two lines forced onto one axis.
 const CURVE_VIEWS = [
-  { key: 'total', label: 'Resultado' },
+  { key: 'result', label: 'Resultado' },
+  { key: 'total', label: 'Patrimonio' },
   { key: 'holdings', label: 'Tenencias' },
 ];
+
+const swatch = (line) =>
+  `<i style="border-top-color:${line.color};border-top-style:${line.dash ? 'dashed' : 'solid'}"></i>`;
 
 function renderCurveViews() {
   const box = $('curve-view');
@@ -1180,24 +1213,48 @@ function renderCurve(curve) {
   box.hidden = false;
 
   const xs = curve.day.map((d) => Date.parse(d) / 1000);
-  const showingTotal = state.curveView === 'total';
+  const last = (arr) => (arr && arr.length ? arr[arr.length - 1] : 0);
 
-  // The result line crosses zero, so it is drawn against a zero reference and
-  // its fill would be a lie — a filled area below zero reads as a quantity.
-  const series = showingTotal
-    ? [
-        { label: 'Día' },
+  // Three questions, three reference lines. Each view is only readable against
+  // the right baseline: the result against zero, what the account is worth
+  // against what was put into it, the shares against what they cost.
+  const VIEWS = {
+    // The result crosses zero, so it is drawn against a zero reference and a
+    // fill would be a lie — a filled area below zero reads as a quantity.
+    result: {
+      series: [
         { label: 'Resultado', stroke: LINES.close.color, width: 2 },
         { label: 'Cero', stroke: LINES.slow.color, width: 1, dash: [2, 4] },
-      ]
-    : [
-        { label: 'Día' },
+      ],
+      data: [curve.result, curve.result.map(() => 0)],
+      legend: `<span>${swatch(LINES.close)}resultado ${signedMoney(last(curve.result))}</span>`
+        + `<span>${swatch(LINES.slow)}cero</span>`
+        + '<span class="hint-inline">lo que produjo el mercado: depositar no lo mueve</span>',
+    },
+    total: {
+      series: [
+        { label: 'Patrimonio', stroke: LINES.close.color, width: 2, fill: 'rgba(34,197,94,.10)' },
+        { label: 'Aportado', stroke: LINES.slow.color, width: 1.4, dash: [7, 4] },
+      ],
+      data: [curve.total, curve.contributed],
+      legend: `<span>${swatch(LINES.close)}patrimonio ${money(last(curve.total))}</span>`
+        + `<span>${swatch(LINES.slow)}aportado</span>`
+        + '<span class="hint-inline">acciones más caja: la distancia al aportado es la ganancia</span>',
+    },
+    holdings: {
+      series: [
         { label: 'Valor', stroke: LINES.close.color, width: 2, fill: 'rgba(34,197,94,.10)' },
         { label: 'Costo', stroke: LINES.slow.color, width: 1.4, dash: [7, 4] },
-      ];
-  const data = showingTotal
-    ? [xs, curve.total, curve.total.map(() => 0)]
-    : [xs, curve.market_value, curve.cost_basis];
+      ],
+      data: [curve.market_value, curve.cost_basis],
+      legend: `<span>${swatch(LINES.close)}valor</span>`
+        + `<span>${swatch(LINES.slow)}costo</span>`
+        + '<span class="hint-inline">sólo las acciones: vender lo baja</span>',
+    },
+  };
+  const view = VIEWS[state.curveView] || VIEWS.result;
+  const series = [{ label: 'Día' }, ...view.series];
+  const data = [xs, ...view.data];
 
   if (state.charts.curve) state.charts.curve.destroy();
   state.charts.curve = new uPlot({
@@ -1211,18 +1268,9 @@ function renderCurve(curve) {
     series,
   }, data, $('p-curve'));
 
-  const swatch = (line) =>
-    `<i style="border-top-color:${line.color};border-top-style:${line.dash ? 'dashed' : 'solid'}"></i>`;
   // Dragging across the plot zooms in; without being told, the way back out is
   // undiscoverable — so the legend says it, next to the buttons that do it too.
-  const last = curve.total[curve.total.length - 1];
-  legend.innerHTML = (showingTotal
-    ? `<span>${swatch(LINES.close)}resultado ${signed(last)}</span>`
-      + `<span>${swatch(LINES.slow)}cero</span>`
-      + '<span class="hint-inline">acciones más caja: vender no lo baja</span>'
-    : `<span>${swatch(LINES.close)}valor</span>`
-      + `<span>${swatch(LINES.slow)}costo</span>`
-      + '<span class="hint-inline">sólo las acciones: vender lo baja</span>')
+  legend.innerHTML = view.legend
     + `<span>${escapeHtml(curve.first_day || '')} → ${escapeHtml(curve.last_day || '')}</span>`
     + '<span class="hint-inline">arrastrá para acercar · doble clic para volver</span>';
 }
@@ -1258,11 +1306,12 @@ function renderLedger(ledgerPage) {
     if (t.kind === 'split') detail = `ratio ${num(t.ratio, 0)}:1`;
     else if (t.price != null && t.quantity != null) {
       detail = `${num(t.quantity, t.quantity % 1 ? 4 : 0)} × ${money(t.price)}`;
-    } else if (t.amount != null) detail = 'en efectivo';
+    } else if (CASH_KINDS.includes(t.kind)) detail = '';
+    else if (t.amount != null) detail = 'en efectivo';
     const fee = t.fees ? `comisión ${money(t.fees)}` : '';
     li.innerHTML = `
       <div class="tx-top">
-        <span class="tx-kind">${escapeHtml(t.ticker)} · ${
+        <span class="tx-kind">${t.ticker ? `${escapeHtml(t.ticker)} · ` : ''}${
           escapeHtml(KIND_LABEL[t.kind] || t.kind)}</span>
         <span class="tx-cash ${t.cash_flow > 0 ? 'in' : 'out'}">${
           t.cash_flow ? signed(t.cash_flow) : ''}</span>
@@ -1536,7 +1585,7 @@ function safeClass(value, allowed, fallback = '') {
 const TREND_CLASSES = ['alcista', 'bajista'];
 const SEVERITY_CLASSES = ['info', 'warning', 'critical'];
 const PRIORITY_CLASSES = ['high', 'medium', 'low'];
-const TX_CLASSES = ['buy', 'sell', 'dividend', 'split', 'fee'];
+const TX_CLASSES = ['buy', 'sell', 'dividend', 'split', 'fee', 'deposit', 'withdraw'];
 
 // Just enough markdown to make the report readable. Applied *after* escaping,
 // so the only tags that can reach the DOM are the ones written here.

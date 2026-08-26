@@ -167,7 +167,8 @@ te acordás a cuánto saliste.
 
 ### El libro mayor
 
-Cada compra, venta, split y dividendo se escribe en `transactions`, que es **append-only**: no
+Cada compra, venta, split, dividendo, comisión, depósito y retiro se escribe en
+`transactions`, que es **append-only**: no
 se edita ni se borra nada. Tus tenencias —cantidad, costo promedio, P&L realizado, dividendos
 cobrados— salen de replayar esas entradas, no de un campo guardado.
 
@@ -524,19 +525,33 @@ Arriba tiene botones de ventana (1M, 3M, 6M, 1A, Todo). Arrastrando sobre el gr�
 acerca a un tramo, y **doble clic vuelve** — la leyenda lo dice, porque si no no hay forma de
 adivinarlo.
 
-### Resultado o tenencias
+### Resultado, patrimonio o tenencias
 
-La curva se lee de dos maneras y el botón de la izquierda las cambia:
+La curva se lee de tres maneras y el botón de la izquierda las cambia:
 
 - **Tenencias** — cuánto valen tus acciones. Vender la baja, porque tenés menos acciones.
-- **Resultado** — las acciones **más la caja** que el libro fue generando. Comprar mueve
-  plata de la caja a las acciones y la deja igual; vender la mueve de vuelta y la deja igual.
-  Sólo se mueve cuando se mueve el mercado, así que **no baja cuando tomás ganancias**.
+- **Patrimonio** — las acciones **más la caja**. Comprar mueve plata de la caja a las acciones
+  y lo deja igual; vender la mueve de vuelta y lo deja igual. Sólo se mueve cuando se mueve el
+  mercado, así que **no baja cuando tomás ganancias**. La línea punteada es lo que aportaste:
+  la distancia entre las dos es la ganancia.
+- **Resultado** — el patrimonio **menos lo que pusiste**. Es la parte que produjo el mercado:
+  depositar 10.000 sube el patrimonio 10.000 y deja el resultado donde estaba.
 
-La caja arranca en cero y es la suma de lo que cada movimiento le hizo. Eso hace que
-*Resultado* sea cuánto ganaste o perdiste desde tu primera operación, no un saldo bancario —
-para eso habría que registrar los depósitos. Mientras esté en negativo, la app lo muestra como
-**neto invertido**: es plata que está adentro de las acciones, no una pérdida. Las tenencias salen del ledger, así que el
+### Depósitos y retiros para ver el saldo real
+
+Sin depósitos cargados la caja arranca en cero y queda negativa mientras la plata está en
+acciones — la app lo dice así, **neto invertido**, porque no es una pérdida. Registrando los
+depósitos pasa a ser un saldo de verdad: lo que efectivamente tenés sin invertir.
+
+Se cargan como cualquier otro movimiento, con tipo **Depósito** o **Retiro**. No llevan ticker
+—es plata que entra o sale de la cuenta, no de un papel— así que el formulario esconde ese
+campo y sólo pide monto y fecha.
+
+Registrarlos no ensucia el resultado: lo aportado se descuenta, así que un depósito mueve el
+patrimonio y no la ganancia. La comisión de un retiro sí es una pérdida y cuenta como tal. Si
+nunca cargás un depósito nada cambia: lo aportado es cero y el resultado es lo que era.
+
+Las tenencias salen del ledger, así que el
 costo es el promedio real de todas tus compras y el P&L realizado incluye lo que ya
 vendiste.
 
@@ -571,7 +586,7 @@ moneda también se rechaza, con el mismo motivo.
 ### Cargar cosas desde el teléfono
 
 Desde la app se pueden **crear alertas**, silenciarlas o borrarlas, **cargar movimientos**
-(compra, venta, dividendo, split, comisión) y **marcar avisos como vistos**.
+(compra, venta, dividendo, split, comisión, depósito, retiro) y **marcar avisos como vistos**.
 
 Desde la pestaña **IA** se pide el informe a Gemini. Antes de pedirlo podés **pegar el texto
 de tu app de inversión** —lo mismo que ofrece la terminal—: entra al informe como

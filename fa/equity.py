@@ -14,21 +14,22 @@ Two readings, because one of them answers a question the other cannot:
 
 * **holdings** — what the shares are worth. Selling drops it, which is correct
   and also why it is not the whole story: the money did not evaporate.
-* **total** — holdings plus the cash the ledger has produced. Buying moves
-  money from cash into shares and leaves it flat; selling moves it back and
-  leaves it flat. It only moves when the market does, so it is continuous
-  across a sale.
+* **total** — holdings plus cash: what the account is worth. Buying moves money
+  from cash into shares and leaves it flat; selling moves it back and leaves it
+  flat. It only moves when the market does, so it is continuous across a sale.
+* **result** — the same figure minus what the holder put in, which is the part
+  the market produced. A deposit lifts ``total`` and leaves ``result`` alone.
 
-Cash starts at zero and is the running sum of what every entry did to it. That
-makes ``total`` the result — everything gained or lost since the first trade —
-rather than a bank balance, which would need deposits recorded to be true.
+Cash is the running sum of what every entry did to it. With no deposit on file
+it starts at zero, ``contributed`` is zero and the two lines coincide; record
+the deposits and cash becomes a real balance while the result stays the result.
 """
 from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
-from fa import ledger
+from fa import ledger, models
 from fa.models import Transaction
 from fa.store import history as history_store
 from fa.store import transactions as transactions_store
@@ -67,12 +68,14 @@ def curve(
         return []
 
     end = today or date.today()
+    # Money going in starts the account, even before the first purchase.
     first_trade = min(e.trade_date for e in entries)
     start = max(first_trade, end - timedelta(days=days - 1))
     if start > end:
         return []
 
-    tickers = sorted({e.ticker for e in entries})
+    # Cash movements name no ticker; they reach the curve through the cash sum.
+    tickers = sorted({e.ticker for e in entries if e.ticker})
     by_ticker: dict[str, list[Transaction]] = {
         ticker: [e for e in entries if e.ticker == ticker] for ticker in tickers
     }
@@ -88,7 +91,9 @@ def curve(
         open_holdings = 0
         # What every entry up to this day did to the cash side. Sums across
         # tickers, so it is computed here rather than per holding.
-        cash = sum(e.cash_flow for e in entries if e.trade_date <= day)
+        so_far_all = [e for e in entries if e.trade_date <= day]
+        cash = sum(e.cash_flow for e in so_far_all)
+        put_in = models.contributed(so_far_all)
         for ticker in tickers:
             so_far = [e for e in by_ticker[ticker] if e.trade_date <= day]
             if not so_far:
@@ -116,7 +121,9 @@ def curve(
                     "market_value": round(value, 4),
                     "cost_basis": round(cost, 4),
                     "cash": round(cash, 4),
+                    "contributed": round(put_in, 4),
                     "total": round(value + cash, 4),
+                    "result": round(value + cash - put_in, 4),
                     "pnl_abs": round(value - cost, 4),
                     "pnl_pct": round((value - cost) / cost * 100.0, 4) if cost else None,
                     "holdings": priced,

@@ -21,7 +21,7 @@ puede valuar queda **fuera del total con su motivo** en vez de contarse como cer
 | **Análisis fundamental** | FCF, EV, yields y deuda neta real desde los estados contables |
 | **Indicadores técnicos** | RSI, MACD, Bollinger, ATR, drawdown, fuerza relativa vs índice |
 | **18 tipos de alerta** | precio, porcentaje, técnicos, earnings, dividendos, splits |
-| **Libro mayor** | compras, ventas, splits y dividendos; las tenencias se derivan de ahí |
+| **Libro mayor** | compras, ventas, splits, dividendos, depósitos y retiros; las tenencias y el saldo se derivan de ahí |
 | **Historial** | velas, indicadores, corridas y valuaciones se guardan, no se recalculan |
 | **Reporte de IA** | Gemini con los datos servidos y la procedencia declarada |
 | **Dashboard web** | PWA instalable, sin tienda, con gráficos y alta de alertas |

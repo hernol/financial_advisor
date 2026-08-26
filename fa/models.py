@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 # Letters, digits, dot and dash: every real symbol fits, and nothing that could
 # be mistaken for markup does. The dashboard escapes anyway; this keeps the bad
@@ -15,7 +15,32 @@ SELL = "sell"
 SPLIT = "split"
 DIVIDEND = "dividend"
 FEE = "fee"
-TRANSACTION_KINDS = (BUY, SELL, SPLIT, DIVIDEND, FEE)
+DEPOSIT = "deposit"
+WITHDRAW = "withdraw"
+TRANSACTION_KINDS = (BUY, SELL, SPLIT, DIVIDEND, FEE, DEPOSIT, WITHDRAW)
+
+# Money entering or leaving the account rather than moving between cash and
+# shares. They have no ticker: attaching one would invent a relationship that
+# does not exist, and every per-ticker calculation would then have to know to
+# ignore it.
+CASH_KINDS = (DEPOSIT, WITHDRAW)
+
+
+def contributed(entries: Iterable[Transaction]) -> float:
+    """Money the account holder put in, net of what they took out.
+
+    Only the amount counts as capital: the fee on a withdrawal is a cost, not
+    money returned, so it stays out of here and lands in the result instead.
+    Without any deposit recorded this is zero, which is what makes the result
+    read the same as it did before deposits existed.
+    """
+    total = 0.0
+    for entry in entries:
+        if entry.kind == DEPOSIT:
+            total += entry.amount or 0.0
+        elif entry.kind == WITHDRAW:
+            total -= entry.amount or 0.0
+    return total
 
 
 @dataclass(frozen=True)
@@ -113,8 +138,8 @@ class Transaction:
     here, so the real history is always recoverable.
     """
 
-    ticker: str
-    kind: str  # buy | sell | split | dividend | fee
+    ticker: str | None
+    kind: str  # buy | sell | split | dividend | fee | deposit | withdraw
     trade_date: date
     quantity: float | None = None
     price: float | None = None
@@ -141,18 +166,28 @@ class Transaction:
 
     @property
     def cash_flow(self) -> float:
-        """Signed cash impact: negative when money leaves the account."""
-        if self.amount is not None:
-            return self.amount
+        """Signed cash impact: negative when money leaves the account.
+
+        Each kind decides for itself. An earlier version short-circuited on
+        ``amount`` being set, which made a withdrawal of 1200 read as +1200 —
+        the amount says how much, never which way.
+        """
         gross = (self.quantity or 0.0) * (self.price or 0.0)
         if self.kind == BUY:
             return -(gross + self.fees)
         if self.kind == SELL:
             return gross - self.fees
         if self.kind == DIVIDEND:
-            return gross - self.fees
+            # Either a total, or a per-share rate times the shares.
+            received = self.amount if self.amount is not None else gross
+            return received - self.fees
+        if self.kind == DEPOSIT:
+            return (self.amount or 0.0) - self.fees
+        if self.kind == WITHDRAW:
+            return -((self.amount or 0.0) + self.fees)
         if self.kind == FEE:
-            return -self.fees
+            return -(self.amount if self.amount is not None else self.fees)
+        # A split moves no money.
         return 0.0
 
     def with_id(self, transaction_id: int) -> "Transaction":

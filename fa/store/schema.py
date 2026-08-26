@@ -94,7 +94,10 @@ CREATE TABLE IF NOT EXISTS transactions (
     id          {ID_PK},
     account_id  {FK_ID} NOT NULL DEFAULT 1 REFERENCES accounts(id) ON DELETE CASCADE,
     position_id {FK_ID} REFERENCES positions(id) ON DELETE SET NULL,
-    ticker      TEXT NOT NULL,
+    -- Null for a deposit or a withdrawal: money entering or leaving the
+    -- account belongs to no ticker, and inventing one would make every
+    -- per-ticker calculation carry an exception.
+    ticker      TEXT,
     kind        TEXT NOT NULL,
     trade_date  TEXT NOT NULL,
     quantity    {REAL},
