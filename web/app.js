@@ -67,8 +67,18 @@ let signingIn = false;
 
 const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi',
-  period: 'annual', charts: {}, kinds: null,
+  period: 'annual', curveDays: 0, charts: {}, kinds: null,
 };
+
+// The equity curve is a calendar series, not a series of sessions, so its
+// windows are in days rather than in trading days. 0 means everything there is.
+const CURVE_RANGES = [
+  { label: '1M', days: 30 },
+  { label: '3M', days: 90 },
+  { label: '6M', days: 182 },
+  { label: '1A', days: 365 },
+  { label: 'Todo', days: 0 },
+];
 
 const RANGES = [
   { label: '1M', days: 22 },
@@ -909,7 +919,7 @@ const KIND_LABEL = {
 async function loadPortfolio() {
   const [p, curve, txs] = await Promise.all([
     api('/api/portfolio'),
-    api('/api/portfolio/history'),
+    api(`/api/portfolio/history?days=${state.curveDays || 3650}`),
     api('/api/portfolio/transactions?limit=12'),
   ]);
 
@@ -1015,12 +1025,31 @@ function renderHoldings(p) {
   }
 }
 
+function renderCurveRanges() {
+  const box = $('curve-ranges');
+  box.innerHTML = '';
+  for (const range of CURVE_RANGES) {
+    const button = document.createElement('button');
+    button.className = 'range';
+    button.type = 'button';
+    button.textContent = range.label;
+    button.setAttribute('aria-pressed', String(range.days === state.curveDays));
+    button.addEventListener('click', () => {
+      state.curveDays = range.days;
+      loadPortfolio().catch((e) => showError(e.message));
+    });
+    box.appendChild(button);
+  }
+}
+
 function renderCurve(curve) {
   const box = $('p-curve-box');
   const legend = $('p-curve-legend');
+  renderCurveRanges();
 
   // One point is not a curve; saying so beats drawing a dot on an empty axis.
   if (curve.sessions < 2) {
+    renderCurveRanges();
     if (state.charts.curve) { state.charts.curve.destroy(); state.charts.curve = null; }
     $('p-curve').innerHTML = '';
     box.hidden = curve.sessions === 0;
@@ -1049,10 +1078,14 @@ function renderCurve(curve) {
 
   const swatch = (line) =>
     `<i style="border-top-color:${line.color};border-top-style:${line.dash ? 'dashed' : 'solid'}"></i>`;
+  // Dragging across the plot zooms in; without being told, the way back out is
+  // undiscoverable — so the legend says it, next to the buttons that do it too.
   legend.innerHTML =
     `<span>${swatch(LINES.close)}valor</span>`
     + `<span>${swatch(LINES.slow)}costo</span>`
-    + `<span>${curve.sessions} día(s)</span>`;
+    + `<span>${escapeHtml(curve.first_day || '')} → ${escapeHtml(curve.last_day || '')}</span>`
+    + `<span>${curve.sessions} día(s)</span>`
+    + '<span class="hint-inline">arrastrá para acercar · doble clic para volver</span>';
 }
 
 function renderLedger(txs) {

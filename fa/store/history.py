@@ -177,6 +177,10 @@ def latest_indicators(conn: Database, ticker: str) -> Mapping[str, Any] | None:
     return item
 
 
+# The valuations table is a record of what was observed: the portfolio's value
+# at the moment a check ran, alongside the alerts that ran with it. The curve on
+# screen is derived from the ledger instead (see fa.equity), because that can
+# reach back before this table existed and moves when a trade is corrected.
 def save_valuation(
     conn: Database,
     *,
@@ -210,27 +214,3 @@ def save_valuation(
     )
     conn.commit()
     return new_id
-
-
-def equity_curve(
-    conn: Database, *, days: int = 365, account_id: int = LOCAL_ACCOUNT_ID
-) -> list[Mapping[str, Any]]:
-    """Daily closing valuation, one row per day (the last of each day wins).
-
-    Joining against the per-day maximum rather than selecting bare columns
-    alongside ``MAX()``: SQLite would allow the shorter form and pick the right
-    row, but Postgres rejects it outright, and the join says what is meant on
-    both.
-    """
-    rows = conn.execute(
-        "SELECT v.day, v.taken_at, v.market_value, v.cost_basis, v.pnl_abs, v.pnl_pct "
-        "FROM portfolio_valuations v "
-        "JOIN (SELECT day AS d, MAX(taken_at) AS latest FROM portfolio_valuations "
-        "      WHERE account_id = ? GROUP BY day) m "
-        "ON m.d = v.day AND m.latest = v.taken_at "
-        "WHERE v.account_id = ? ORDER BY v.day DESC LIMIT ?",
-        (account_id, account_id, days),
-    )
-    out = [dict(row) for row in rows]
-    out.reverse()
-    return out

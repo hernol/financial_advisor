@@ -157,23 +157,33 @@ def test_dividends_accumulate_across_the_portfolio(client, conn):
 # --- the curve --------------------------------------------------------------
 
 
-def test_the_curve_returns_one_point_per_day(client, conn):
-    for day, value in ((date(2026, 8, 18), 1000.0), (date(2026, 8, 19), 1100.0)):
-        history_store.save_valuation(
-            conn,
-            cost_basis=900.0,
-            market_value=value,
-            pnl_abs=value - 900.0,
-            pnl_pct=(value - 900.0) / 9.0,
-            positions=1,
-            taken_at=__import__("datetime").datetime(
-                day.year, day.month, day.day, 20, 0, tzinfo=__import__("datetime").timezone.utc
-            ),
-        )
+def test_the_curve_is_derived_from_the_ledger_and_the_bars(client, conn):
+    """Not read back from the valuations table: those only start the day the
+    feature was installed, and the ledger knows the whole history."""
+    buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, closes=(100.0, 110.0, 130.0), end=date(2026, 8, 20))
     body = client.get("/api/portfolio/history").json()
-    assert body["sessions"] == 2
-    assert body["day"] == ["2026-08-18", "2026-08-19"]
-    assert body["market_value"] == [1000.0, 1100.0]
+    # It runs to today, carrying the last close forward, so only the first
+    # three days are pinned here.
+    assert body["day"][:3] == ["2026-08-18", "2026-08-19", "2026-08-20"]
+    assert body["market_value"][:3] == [1000.0, 1100.0, 1300.0]
+    assert body["cost_basis"][:3] == [1000.0, 1000.0, 1000.0]
+    assert body["market_value"][-1] == 1300.0
+
+
+def test_the_curve_starts_at_the_first_purchase(client, conn):
+    buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 19))
+    bars(conn, closes=(100.0, 110.0, 130.0), end=date(2026, 8, 20))
+    body = client.get("/api/portfolio/history").json()
+    assert body["first_day"] == "2026-08-19"
+
+
+def test_stored_valuations_are_not_what_the_curve_reads(client, conn):
+    """Seeding one must not put a point on a curve the ledger cannot support."""
+    history_store.save_valuation(
+        conn, cost_basis=1.0, market_value=999.0, pnl_abs=1.0, pnl_pct=1.0, positions=1
+    )
+    assert client.get("/api/portfolio/history").json()["sessions"] == 0
 
 
 # --- the ledger -------------------------------------------------------------

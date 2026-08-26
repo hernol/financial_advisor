@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from fa import ledger, models
+from fa import equity, ledger, models
 from fa.api.auth import account_id
 from fa.api.deps import build_market, get_db
 from fa.config import BASE_CURRENCY
@@ -127,13 +127,17 @@ def history(
 ) -> dict[str, Any]:
     """The equity curve, one point per day.
 
-    Written by the scheduled check rather than on demand, so the curve has a
-    point for every day the timer ran — not only the days somebody opened this
-    screen.
+    Derived from the ledger and the stored bars rather than read back from the
+    valuations table. The recorded points only start the day the feature was
+    installed; the ledger knows what was held from the first purchase onwards
+    and the bars know what it was worth, so the whole history is available —
+    and a corrected trade moves every point that depended on it.
     """
-    points = history_store.equity_curve(db, days=days, account_id=account)
+    points = equity.curve(db, days=days, account_id=account)
     return {
         "sessions": len(points),
+        "first_day": points[0]["day"] if points else None,
+        "last_day": points[-1]["day"] if points else None,
         "day": [p["day"] for p in points],
         "market_value": [p["market_value"] for p in points],
         "cost_basis": [p["cost_basis"] for p in points],

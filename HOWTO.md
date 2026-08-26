@@ -510,7 +510,15 @@ Agregar a inicio). Queda como una app más, a pantalla completa.
 Dos secciones en la barra inferior.
 
 **Cartera** — el valor total con su P&L, la curva de equity, cada tenencia con su peso en
-la cartera y el libro mayor de movimientos. Las tenencias salen del ledger, así que el
+la cartera y el libro mayor de movimientos.
+
+La curva **no** sale de un registro que arranca el día que instalaste esto: se **deriva** del
+libro mayor y de las velas guardadas, así que empieza en tu primera compra. Y si corregís una
+operación, se mueve todo el pasado que dependía de ella.
+
+Arriba tiene botones de ventana (1M, 3M, 6M, 1A, Todo). Arrastrando sobre el gráfico se
+acerca a un tramo, y **doble clic vuelve** — la leyenda lo dice, porque si no no hay forma de
+adivinarlo. Las tenencias salen del ledger, así que el
 costo es el promedio real de todas tus compras y el P&L realizado incluye lo que ya
 vendiste.
 

@@ -1004,3 +1004,6 @@ table.grid td.down { color: var(--down); }
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* A quiet aside in the legend: how to undo a drag-zoom, where the zoom is. */
+.legend .hint-inline { color: var(--fg-dim); font-size: .68rem; }

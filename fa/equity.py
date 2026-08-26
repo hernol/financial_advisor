@@ -1,0 +1,103 @@
+"""The equity curve, derived rather than only recorded.
+
+``portfolio_valuations`` holds what was observed: one point per scheduled run,
+which means the curve starts the day the feature was installed and shows a
+single dot. But the past is not missing — it is implied. The ledger says what
+was held on any date and ``daily_bars`` says what it was worth, so the whole
+history can be rebuilt from the first purchase onwards.
+
+Deriving it rather than backfilling rows also keeps it honest: correct a trade
+and every point that depended on it moves, instead of leaving the stored curve
+telling yesterday's version of the story.
+"""
+from __future__ import annotations
+
+from datetime import date, timedelta
+from typing import Any, Mapping, Sequence
+
+from fa import ledger
+from fa.models import Transaction
+from fa.store import history as history_store
+from fa.store import transactions as transactions_store
+from fa.store.database import Database
+from fa.store.schema import LOCAL_ACCOUNT_ID
+
+
+def _closes_by_day(conn: Database, ticker: str) -> Mapping[date, float]:
+    return {bar.day: bar.close for bar in history_store.load_bars(conn, ticker)}
+
+
+def _price_on(closes: Mapping[date, float], ordered: Sequence[date], day: date) -> float | None:
+    """The last close on or before ``day``.
+
+    Markets are shut on weekends and holidays; a portfolio still has a value on
+    a Sunday, and it is Friday's.
+    """
+    best: float | None = None
+    for session in ordered:
+        if session > day:
+            break
+        best = closes[session]
+    return best
+
+
+def curve(
+    conn: Database,
+    *,
+    days: int = 365,
+    account_id: int = LOCAL_ACCOUNT_ID,
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    """Daily value and cost of the portfolio, from the ledger and stored bars."""
+    entries = transactions_store.list_transactions(conn, account_id=account_id)
+    if not entries:
+        return []
+
+    end = today or date.today()
+    first_trade = min(e.trade_date for e in entries)
+    start = max(first_trade, end - timedelta(days=days - 1))
+    if start > end:
+        return []
+
+    tickers = sorted({e.ticker for e in entries})
+    by_ticker: dict[str, list[Transaction]] = {
+        ticker: [e for e in entries if e.ticker == ticker] for ticker in tickers
+    }
+    closes = {ticker: _closes_by_day(conn, ticker) for ticker in tickers}
+    ordered = {ticker: sorted(closes[ticker]) for ticker in tickers}
+
+    points: list[dict[str, Any]] = []
+    day = start
+    while day <= end:
+        value = 0.0
+        cost = 0.0
+        priced = 0
+        for ticker in tickers:
+            so_far = [e for e in by_ticker[ticker] if e.trade_date <= day]
+            if not so_far:
+                continue
+            # Replayed through the same function the live holdings use, rather
+            # than a second implementation of the same arithmetic that could
+            # drift from it.
+            holding = ledger.replay(ticker, so_far)
+            if not holding.is_open:
+                continue
+            price = _price_on(closes[ticker], ordered[ticker], day)
+            if price is None:
+                continue
+            value += holding.quantity * price
+            cost += holding.cost_basis
+            priced += 1
+        if priced:
+            points.append(
+                {
+                    "day": day.isoformat(),
+                    "market_value": round(value, 4),
+                    "cost_basis": round(cost, 4),
+                    "pnl_abs": round(value - cost, 4),
+                    "pnl_pct": round((value - cost) / cost * 100.0, 4) if cost else None,
+                    "holdings": priced,
+                }
+            )
+        day += timedelta(days=1)
+    return points

@@ -215,16 +215,18 @@ def test_bar_coverage_reports_what_is_held(conn):
 # --- the equity curve -------------------------------------------------------
 
 
-def test_a_valuation_becomes_a_point_on_the_curve(conn):
+def test_a_valuation_is_recorded(conn):
     history_store.save_valuation(
         conn, cost_basis=1000.0, market_value=1200.0, pnl_abs=200.0, pnl_pct=20.0, positions=1
     )
-    curve = history_store.equity_curve(conn)
-    assert len(curve) == 1
-    assert curve[0]["market_value"] == 1200.0
+    row = conn.execute("SELECT * FROM portfolio_valuations").fetchone()
+    assert row["market_value"] == 1200.0
+    assert row["positions"] == 1
 
 
-def test_the_curve_keeps_the_last_valuation_of_each_day(conn):
+def test_every_run_leaves_its_own_valuation(conn):
+    """The table is the record of what was observed, one row per observation;
+    the curve on screen is derived from the ledger instead."""
     moment = datetime(2026, 8, 20, 10, 0, tzinfo=timezone.utc)
     for hour, value in ((10, 1100.0), (14, 1250.0)):
         history_store.save_valuation(
@@ -236,9 +238,10 @@ def test_the_curve_keeps_the_last_valuation_of_each_day(conn):
             positions=1,
             taken_at=moment.replace(hour=hour),
         )
-    curve = history_store.equity_curve(conn)
-    assert len(curve) == 1
-    assert curve[0]["market_value"] == 1250.0
+    rows = conn.execute(
+        "SELECT market_value FROM portfolio_valuations ORDER BY taken_at"
+    ).fetchall()
+    assert [r["market_value"] for r in rows] == [1100.0, 1250.0]
 
 
 # --- events -----------------------------------------------------------------

@@ -98,7 +98,7 @@ def test_a_foreign_holding_does_not_reach_the_equity_curve(conn):
     """A valuation with nothing priced is not a zero, it is an absence."""
     buy(conn)
     build_portfolio(conn, FixedMarket(currency="EUR"))
-    assert history_store.equity_curve(conn) == []
+    assert conn.execute("SELECT COUNT(*) c FROM portfolio_valuations").fetchone()["c"] == 0
 
 
 # --- the API ----------------------------------------------------------------
