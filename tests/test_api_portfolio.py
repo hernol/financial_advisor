@@ -237,3 +237,25 @@ def test_the_oldest_entry_is_reachable(client, conn):
 
     everything = client.get("/api/portfolio/transactions?limit=100").json()
     assert "OLD" in [r["ticker"] for r in everything["entries"]]
+
+
+def test_the_ledger_can_be_paged_through(client, conn):
+    for day in range(1, 6):
+        buy(conn, ticker=f"T{day}", day=date(2026, 8, day))
+    first = client.get("/api/portfolio/transactions?limit=2&offset=0").json()
+    second = client.get("/api/portfolio/transactions?limit=2&offset=2").json()
+    third = client.get("/api/portfolio/transactions?limit=2&offset=4").json()
+
+    assert first["total"] == second["total"] == 5
+    assert [first["offset"], second["offset"], third["offset"]] == [0, 2, 4]
+    assert third["shown"] == 1
+    # Newest first, so paging forward walks back in time without repeating.
+    seen = [r["ticker"] for page in (first, second, third) for r in page["entries"]]
+    assert seen == ["T5", "T4", "T3", "T2", "T1"]
+
+
+def test_an_offset_past_the_end_is_an_empty_page_not_an_error(client, conn):
+    buy(conn, ticker="AAA")
+    body = client.get("/api/portfolio/transactions?limit=10&offset=50").json()
+    assert body["entries"] == []
+    assert body["total"] == 1

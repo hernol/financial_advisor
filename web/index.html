@@ -108,17 +108,29 @@
 
     <dl id="p-totals" class="stats"></dl>
 
-    <h2 class="section-h">Tenencias</h2>
-    <ul id="holding-list" class="cards"></ul>
-
-    <div class="section-head">
-      <h2 class="section-h">Movimientos <span id="tx-count" class="count"></span></h2>
-      <button id="add-tx" class="add" type="button">
-        <svg aria-hidden="true"><use href="#i-plus"/></svg> Cargar
-      </button>
+    <div class="tabs" role="tablist" aria-label="Vistas de la cartera">
+      <button class="tab" data-ptab="holdings" role="tab" aria-selected="true"
+              aria-controls="ptab-holdings" id="ptabbtn-holdings">Tenencias</button>
+      <button class="tab" data-ptab="movements" role="tab" aria-selected="false"
+              aria-controls="ptab-movements" id="ptabbtn-movements">Movimientos</button>
     </div>
-    <ul id="tx-list" class="cards"></ul>
-    <button id="tx-more" class="btn ghost" type="button" hidden></button>
+
+    <div id="ptab-holdings" class="panel" role="tabpanel" aria-labelledby="ptabbtn-holdings">
+      <ul id="holding-list" class="cards"></ul>
+      <nav id="holding-pager" class="pager" aria-label="Páginas de tenencias" hidden></nav>
+    </div>
+
+    <div id="ptab-movements" class="panel" role="tabpanel"
+         aria-labelledby="ptabbtn-movements" hidden>
+      <div class="section-head">
+        <span id="tx-count" class="count"></span>
+        <button id="add-tx" class="add" type="button">
+          <svg aria-hidden="true"><use href="#i-plus"/></svg> Cargar
+        </button>
+      </div>
+      <ul id="tx-list" class="cards"></ul>
+      <nav id="tx-pager" class="pager" aria-label="Páginas de movimientos" hidden></nav>
+    </div>
 
     <p id="p-empty" class="notice" hidden>
       No hay posiciones cargadas. Registrá una compra con

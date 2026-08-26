@@ -258,7 +258,13 @@ main { padding: var(--s4); max-width: 56rem; margin: 0 auto; }
   transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 .tab:hover { color: var(--fg); }
-.tab[aria-selected="true"] { background: var(--card); color: var(--fg); font-weight: 600; }
+.tab[aria-selected="true"] {
+  background: var(--card);
+  color: var(--fg);
+  font-weight: 600;
+  /* Two dark greys a shade apart is not enough to say which one is on. */
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 
 /* --- ranges --------------------------------------------------------------- */
 
@@ -1019,3 +1025,43 @@ table.grid td.down { color: var(--down); }
   margin-left: var(--s2);
 }
 #tx-more { margin-top: var(--s2); }
+
+/* --- pager ---------------------------------------------------------------- */
+/* Two arrows and a position. Numbered pages would be more control than a list
+   of this size ever needs, and more to hit on a phone. */
+
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.pager button {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r2);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.pager button:hover:not(:disabled) { color: var(--fg); border-color: var(--border); }
+.pager button:disabled { opacity: .35; cursor: default; }
+
+.pager .position {
+  font-family: var(--f-mono);
+  font-size: .76rem;
+  color: var(--fg-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 8em;
+  text-align: center;
+}
+
+/* The movements heading is just a count now; keep it aligned with its button. */
+#ptab-movements .section-head { align-items: center; margin-bottom: var(--s3); }
+#ptab-movements .count { margin-left: 0; }

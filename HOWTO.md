@@ -512,8 +512,9 @@ Agregar a inicio). Queda como una app más, a pantalla completa.
 
 Dos secciones en la barra inferior.
 
-**Cartera** — el valor total con su P&L, la curva de equity, cada tenencia con su peso en
-la cartera y el libro mayor de movimientos.
+**Cartera** — el valor total con su P&L y la curva de equity arriba, y abajo dos pestañas:
+**Tenencias** (cada papel con su peso en la cartera) y **Movimientos** (el libro mayor). Las
+dos paginan de a 10.
 
 La curva **no** sale de un registro que arranca el día que instalaste esto: se **deriva** del
 libro mayor y de las velas guardadas, así que empieza en tu primera compra. Y si corregís una

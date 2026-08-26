@@ -148,6 +148,7 @@ def history(
 @router.get("/transactions")
 def transactions(
     limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Database = Depends(get_db),
     account: int = Depends(account_id),
 ) -> dict[str, Any]:
@@ -162,10 +163,11 @@ def transactions(
 
     entries = transactions_store.list_transactions(db, account_id=account)
     entries.reverse()
-    page = entries[:limit]
+    page = entries[offset : offset + limit]
     return {
         "total": len(entries),
         "shown": len(page),
+        "offset": offset,
         "entries": [
             {
                 "id": e.id,

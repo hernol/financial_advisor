@@ -67,8 +67,12 @@ let signingIn = false;
 
 const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi',
-  period: 'annual', curveDays: 0, txLimit: 12, charts: {}, kinds: null,
+  period: 'annual', curveDays: 0, charts: {}, kinds: null,
+  // Cartera: which list is on screen and where each one is standing.
+  portfolioTab: 'holdings', holdingPage: 0, txPage: 0,
 };
+
+const PAGE_SIZE = 10;
 
 // The equity curve is a calendar series, not a series of sessions, so its
 // windows are in days rather than in trading days. 0 means everything there is.
@@ -877,6 +881,8 @@ function openTransactionForm(ticker = '', existing = null) {
       }
       const created = await send('/api/portfolio/transactions', 'POST', body);
       sheet.close();
+      // A new entry is the newest, so it is on the first page.
+      state.txPage = 0;
       await loadPortfolio();
       if (created.fetching_prices) {
         // The server went to get them; say so and come back when they land,
@@ -891,6 +897,47 @@ function openTransactionForm(ticker = '', existing = null) {
 }
 
 // --- cartera ----------------------------------------------------------------
+
+
+/** Two arrows and a position. Renders nothing when everything fits on one page. */
+function renderPager(node, { page, size, total, onGo }) {
+  const pages = Math.max(1, Math.ceil(total / size));
+  node.hidden = pages <= 1;
+  node.innerHTML = '';
+  if (pages <= 1) return;
+
+  const first = page * size + 1;
+  const last = Math.min(total, (page + 1) * size);
+
+  const arrow = (label, target, enabled, aria) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = label;
+    button.disabled = !enabled;
+    button.setAttribute('aria-label', aria);
+    if (enabled) button.addEventListener('click', () => onGo(target));
+    return button;
+  };
+
+  const position = document.createElement('span');
+  position.className = 'position';
+  position.textContent = `${first}–${last} de ${total}`;
+
+  node.append(
+    arrow('‹', page - 1, page > 0, 'Página anterior'),
+    position,
+    arrow('›', page + 1, page < pages - 1, 'Página siguiente'),
+  );
+}
+
+function pickPortfolioTab(name) {
+  state.portfolioTab = name;
+  for (const tab of document.querySelectorAll('.tab[data-ptab]')) {
+    tab.setAttribute('aria-selected', String(tab.dataset.ptab === name));
+  }
+  $('ptab-holdings').hidden = name !== 'holdings';
+  $('ptab-movements').hidden = name !== 'movements';
+}
 
 /** Poll until the first fetch of a ticker lands, then refresh. */
 async function awaitPrices(ticker, attempts = 12) {
@@ -920,7 +967,7 @@ async function loadPortfolio() {
   const [p, curve, txs] = await Promise.all([
     api('/api/portfolio'),
     api(`/api/portfolio/history?days=${state.curveDays || 3650}`),
-    api(`/api/portfolio/transactions?limit=${state.txLimit}`),
+    api(`/api/portfolio/transactions?limit=${PAGE_SIZE}&offset=${state.txPage * PAGE_SIZE}`),
   ]);
 
   $('p-empty').hidden = p.count > 0 || txs.length > 0;
@@ -989,7 +1036,21 @@ function renderTotals(p) {
 function renderHoldings(p) {
   const list = $('holding-list');
   list.innerHTML = '';
-  for (const h of p.holdings) {
+
+  // The whole set arrives in one response — the weights are shares of it — so
+  // the paging is done here rather than with another round trip.
+  const pages = Math.max(1, Math.ceil(p.holdings.length / PAGE_SIZE));
+  if (state.holdingPage >= pages) state.holdingPage = pages - 1;
+  const start = state.holdingPage * PAGE_SIZE;
+
+  renderPager($('holding-pager'), {
+    page: state.holdingPage,
+    size: PAGE_SIZE,
+    total: p.holdings.length,
+    onGo: (page) => { state.holdingPage = page; renderHoldings(p); },
+  });
+
+  for (const h of p.holdings.slice(start, start + PAGE_SIZE)) {
     const li = document.createElement('li');
     li.className = 'holding';
     li.tabIndex = 0;
@@ -1034,6 +1095,7 @@ function renderHoldings(p) {
       try {
         await send(`/api/portfolio/holdings/${h.ticker}`, 'DELETE');
         showOk(`${h.ticker} salió de la cartera.`);
+        state.txPage = 0;
         await loadPortfolio();
       } catch (e) { showError(e.message); }
     });
@@ -1115,14 +1177,18 @@ function renderLedger(ledgerPage) {
   const list = $('tx-list');
   list.innerHTML = '';
 
-  // Say what is not on screen. A list cut at a limit with nothing to say so is
-  // how a movement goes missing and reads as a bug.
-  const hidden = ledgerPage.total - ledgerPage.shown;
-  $('tx-count').textContent = hidden > 0
-    ? `${ledgerPage.shown} de ${ledgerPage.total}` : `${ledgerPage.total}`;
-  const more = $('tx-more');
-  more.hidden = hidden <= 0;
-  more.textContent = `Ver los ${hidden} restantes`;
+  $('tx-count').textContent = ledgerPage.total === 1
+    ? '1 movimiento' : `${ledgerPage.total} movimientos`;
+
+  renderPager($('tx-pager'), {
+    page: state.txPage,
+    size: PAGE_SIZE,
+    total: ledgerPage.total,
+    onGo: (page) => {
+      state.txPage = page;
+      loadPortfolio().catch((e) => showError(e.message));
+    },
+  });
 
   if (!txs.length) {
     list.innerHTML = '<li class="notice">El libro mayor está vacío.</li>';
@@ -1534,7 +1600,10 @@ async function checkNow() {
 // --- navegación -------------------------------------------------------------
 
 function pickTab(name) {
-  for (const tab of document.querySelectorAll('.tab')) {
+  // Scoped to this strip: there are two of them on the page now, and a bare
+  // .tab matched both — clicking a portfolio tab ran this with undefined,
+  // which marked every tab of both strips selected.
+  for (const tab of document.querySelectorAll('.tab[data-tab]')) {
     tab.setAttribute('aria-selected', String(tab.dataset.tab === name));
   }
   $('tab-chart').hidden = name !== 'chart';
@@ -1617,10 +1686,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   $('add-tx').addEventListener('click', () => openTransactionForm());
-  $('tx-more').addEventListener('click', () => {
-    state.txLimit = 500;
-    loadPortfolio().catch((e) => showError(e.message));
-  });
+  for (const tab of document.querySelectorAll('.tab[data-ptab]')) {
+    tab.addEventListener('click', () => pickPortfolioTab(tab.dataset.ptab));
+  }
   $('ask-ai').addEventListener('click', openReportForm);
   $('check-now').addEventListener('click', checkNow);
   $('add-alert').addEventListener('click', () => {
@@ -1643,7 +1711,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  for (const tab of document.querySelectorAll('.tab')) {
+  for (const tab of document.querySelectorAll('.tab[data-tab]')) {
     tab.addEventListener('click', () => pickTab(tab.dataset.tab));
   }
 
