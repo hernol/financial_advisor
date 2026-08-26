@@ -1065,3 +1065,14 @@ table.grid td.down { color: var(--down); }
 /* The movements heading is just a count now; keep it aligned with its button. */
 #ptab-movements .section-head { align-items: center; margin-bottom: var(--s3); }
 #ptab-movements .count { margin-left: 0; }
+
+/* The curve carries two controls: what it shows, and how far back. */
+.curve-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--s3);
+}
+.curve-controls .ranges { margin-bottom: 0; }

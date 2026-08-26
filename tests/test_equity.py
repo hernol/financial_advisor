@@ -97,8 +97,10 @@ def test_a_sale_takes_the_holding_out_from_that_day(conn):
     )
     bars(conn, "PODD", (100.0, 110.0, 130.0))
     points = equity.curve(conn, today=END)
-    # Held on the 18th, sold on the 19th: nothing to value afterwards.
-    assert [p["day"] for p in points] == ["2026-08-18"]
+    # Held on the 18th, sold on the 19th: the holdings go to zero from there,
+    # and the curve carries on so the realised result stays visible.
+    assert [p["day"] for p in points] == ["2026-08-18", "2026-08-19", "2026-08-20"]
+    assert [p["market_value"] for p in points] == [1000.0, 0.0, 0.0]
 
 
 def test_two_holdings_are_added_together(conn):
@@ -168,3 +170,80 @@ def test_correcting_a_trade_moves_the_whole_curve(conn):
 
     assert before == [1000.0, 1100.0, 1300.0]
     assert after == [2000.0, 2200.0, 2600.0]
+
+
+# --- the cash side ----------------------------------------------------------
+
+
+def test_buying_moves_money_from_cash_into_shares(conn):
+    """Neither side is created or destroyed, so the total does not move."""
+    buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, "PODD", (100.0, 100.0, 100.0))
+    point = equity.curve(conn, today=END)[0]
+    assert point["market_value"] == 1000.0
+    assert point["cash"] == -1000.0
+    assert point["total"] == 0.0
+
+
+def test_the_total_moves_only_when_the_market_does(conn):
+    buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, "PODD", (100.0, 110.0, 130.0))
+    totals = [p["total"] for p in equity.curve(conn, today=END)]
+    assert totals == [0.0, 100.0, 300.0]
+
+
+def test_selling_does_not_step_the_total_down(conn):
+    """The complaint this exists for: the shares go, the money does not."""
+    position = buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, "PODD", (100.0, 130.0, 130.0))
+    positions_store.close_position(
+        conn, position.id, price=130.0, close_date=date(2026, 8, 19)
+    )
+    points = equity.curve(conn, today=END)
+    # The 19th onward has nothing held, and the curve continues: the holdings
+    # go to zero and the gain is sitting in cash.
+    assert [p["market_value"] for p in points] == [1000.0, 0.0, 0.0]
+    assert [p["total"] for p in points] == [0.0, 300.0, 300.0]
+
+
+def test_a_sale_leaves_the_gain_in_cash(conn):
+    buy(conn, ticker="AAA", quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    buy(conn, ticker="BBB", quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, "AAA", (100.0, 130.0, 130.0))
+    bars(conn, "BBB", (100.0, 100.0, 100.0))
+    transactions_store.record(
+        conn,
+        Transaction(ticker="AAA", kind=models.SELL, trade_date=date(2026, 8, 19),
+                    quantity=10.0, price=130.0),
+    )
+    positions_store.sync_from_ledger(conn, "AAA")
+    points = equity.curve(conn, today=END)
+    before, after = points[0], points[-1]
+    assert before["market_value"] == 2000.0
+    assert after["market_value"] == 1000.0   # only BBB is left
+    assert after["cash"] == -700.0           # -2000 spent, +1300 back
+    assert before["total"] == 0.0
+    assert after["total"] == 300.0           # the gain survived the sale
+
+
+def test_a_dividend_lands_in_cash(conn):
+    buy(conn, quantity=10.0, price=100.0, day=date(2026, 8, 18))
+    bars(conn, "PODD", (100.0, 100.0, 100.0))
+    transactions_store.record(
+        conn,
+        Transaction(ticker="PODD", kind=models.DIVIDEND, trade_date=date(2026, 8, 19),
+                    amount=50.0),
+    )
+    totals = [p["total"] for p in equity.curve(conn, today=END)]
+    assert totals == [0.0, 50.0, 50.0]
+
+
+def test_fees_come_out_of_the_total(conn):
+    transactions_store.record(
+        conn,
+        Transaction(ticker="PODD", kind=models.BUY, trade_date=date(2026, 8, 18),
+                    quantity=10.0, price=100.0, fees=25.0),
+    )
+    positions_store.sync_from_ledger(conn, "PODD")
+    bars(conn, "PODD", (100.0, 100.0, 100.0))
+    assert equity.curve(conn, today=END)[0]["total"] == -25.0

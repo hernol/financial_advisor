@@ -69,7 +69,7 @@ const state = {
   view: 'portfolio', ticker: null, days: 252, series: 'rsi',
   period: 'annual', curveDays: 0, charts: {}, kinds: null,
   // Cartera: which list is on screen and where each one is standing.
-  portfolioTab: 'holdings', holdingPage: 0, txPage: 0,
+  portfolioTab: 'holdings', holdingPage: 0, txPage: 0, curveView: 'total',
 };
 
 const PAGE_SIZE = 10;
@@ -1012,8 +1012,15 @@ function renderPortfolioHead(p) {
   warn.textContent = notes.join(' ');
 }
 
+// The cash figure is the running sum of what the ledger did to the money side.
+// Negative means it is sitting in shares, which is not a loss — so it is shown
+// as what it is, without the red a signed tone would paint on it.
+const cashLabel = (value) => (value < 0 ? 'Neto invertido' : 'Caja');
+
 const TOTALS = [
-  ['cost_basis', 'Costo', (v, c) => money(v)],
+  ['cost_basis', 'Costo', (v) => money(v)],
+  ['total_result', 'Resultado', (v) => money(v), 'signed'],
+  ['cash', cashLabel, (v) => money(Math.abs(v))],
   ['realized_pnl', 'Realizado', (v) => money(v), 'signed'],
   ['dividends', 'Dividendos', (v) => money(v)],
   ['fees', 'Comisiones', (v) => money(v)],
@@ -1024,11 +1031,13 @@ function renderTotals(p) {
   dl.innerHTML = '';
   for (const [key, label, fmt, tone] of TOTALS) {
     const value = p[key];
-    if (!value && key !== 'cost_basis') continue;
+    // Cash is meaningful at zero and negative; the rest are noise when empty.
+    if (!value && !['cost_basis', 'cash', 'total_result'].includes(key)) continue;
     const box = document.createElement('div');
     box.className = 'stat';
     const cls = tone === 'signed' ? (value >= 0 ? 'up' : 'down') : '';
-    box.innerHTML = `<dt>${label}</dt><dd class="${cls}">${fmt(value)}</dd>`;
+    const name = typeof label === 'function' ? label(value) : label;
+    box.innerHTML = `<dt>${escapeHtml(name)}</dt><dd class="${cls}">${escapeHtml(fmt(value))}</dd>`;
     dl.appendChild(box);
   }
 }
@@ -1109,6 +1118,31 @@ function renderHoldings(p) {
   }
 }
 
+// Two readings of the same ledger. They live on very different scales — one is
+// tens of thousands, the other the few hundred you are up or down — so they are
+// separate views rather than two lines forced onto one axis.
+const CURVE_VIEWS = [
+  { key: 'total', label: 'Resultado' },
+  { key: 'holdings', label: 'Tenencias' },
+];
+
+function renderCurveViews() {
+  const box = $('curve-view');
+  box.innerHTML = '';
+  for (const view of CURVE_VIEWS) {
+    const button = document.createElement('button');
+    button.className = 'range';
+    button.type = 'button';
+    button.textContent = view.label;
+    button.setAttribute('aria-pressed', String(view.key === state.curveView));
+    button.addEventListener('click', () => {
+      state.curveView = view.key;
+      loadPortfolio().catch((e) => showError(e.message));
+    });
+    box.appendChild(button);
+  }
+}
+
 function renderCurveRanges() {
   const box = $('curve-ranges');
   box.innerHTML = '';
@@ -1129,10 +1163,12 @@ function renderCurveRanges() {
 function renderCurve(curve) {
   const box = $('p-curve-box');
   const legend = $('p-curve-legend');
+  renderCurveViews();
   renderCurveRanges();
 
   // One point is not a curve; saying so beats drawing a dot on an empty axis.
   if (curve.sessions < 2) {
+    renderCurveViews();
     renderCurveRanges();
     if (state.charts.curve) { state.charts.curve.destroy(); state.charts.curve = null; }
     $('p-curve').innerHTML = '';
@@ -1144,6 +1180,25 @@ function renderCurve(curve) {
   box.hidden = false;
 
   const xs = curve.day.map((d) => Date.parse(d) / 1000);
+  const showingTotal = state.curveView === 'total';
+
+  // The result line crosses zero, so it is drawn against a zero reference and
+  // its fill would be a lie — a filled area below zero reads as a quantity.
+  const series = showingTotal
+    ? [
+        { label: 'Día' },
+        { label: 'Resultado', stroke: LINES.close.color, width: 2 },
+        { label: 'Cero', stroke: LINES.slow.color, width: 1, dash: [2, 4] },
+      ]
+    : [
+        { label: 'Día' },
+        { label: 'Valor', stroke: LINES.close.color, width: 2, fill: 'rgba(34,197,94,.10)' },
+        { label: 'Costo', stroke: LINES.slow.color, width: 1.4, dash: [7, 4] },
+      ];
+  const data = showingTotal
+    ? [xs, curve.total, curve.total.map(() => 0)]
+    : [xs, curve.market_value, curve.cost_basis];
+
   if (state.charts.curve) state.charts.curve.destroy();
   state.charts.curve = new uPlot({
     width: Math.max(240, $('p-curve').clientWidth - 8),
@@ -1153,22 +1208,22 @@ function renderCurve(curve) {
     cursor: { drag: { x: true, y: false } },
     scales: { x: { time: true } },
     axes: [axis(), axis({ size: 58, values: (u, ticks) => ticks.map((v) => v.toFixed(0)) })],
-    series: [
-      { label: 'Día' },
-      { label: 'Valor', stroke: LINES.close.color, width: 2, fill: 'rgba(34,197,94,.10)' },
-      { label: 'Costo', stroke: LINES.slow.color, width: 1.4, dash: [7, 4] },
-    ],
-  }, [xs, curve.market_value, curve.cost_basis], $('p-curve'));
+    series,
+  }, data, $('p-curve'));
 
   const swatch = (line) =>
     `<i style="border-top-color:${line.color};border-top-style:${line.dash ? 'dashed' : 'solid'}"></i>`;
   // Dragging across the plot zooms in; without being told, the way back out is
   // undiscoverable — so the legend says it, next to the buttons that do it too.
-  legend.innerHTML =
-    `<span>${swatch(LINES.close)}valor</span>`
-    + `<span>${swatch(LINES.slow)}costo</span>`
+  const last = curve.total[curve.total.length - 1];
+  legend.innerHTML = (showingTotal
+    ? `<span>${swatch(LINES.close)}resultado ${signed(last)}</span>`
+      + `<span>${swatch(LINES.slow)}cero</span>`
+      + '<span class="hint-inline">acciones más caja: vender no lo baja</span>'
+    : `<span>${swatch(LINES.close)}valor</span>`
+      + `<span>${swatch(LINES.slow)}costo</span>`
+      + '<span class="hint-inline">sólo las acciones: vender lo baja</span>')
     + `<span>${escapeHtml(curve.first_day || '')} → ${escapeHtml(curve.last_day || '')}</span>`
-    + `<span>${curve.sessions} día(s)</span>`
     + '<span class="hint-inline">arrastrá para acercar · doble clic para volver</span>';
 }
 

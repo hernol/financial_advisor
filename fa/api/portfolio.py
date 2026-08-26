@@ -40,6 +40,8 @@ def portfolio(
     db: Database = Depends(get_db), account: int = Depends(account_id)
 ) -> dict[str, Any]:
     """Every open holding valued at its last stored close."""
+    from fa.store import transactions as transactions_store
+
     rows: list[dict[str, Any]] = []
     market_value = 0.0
     cost_basis = 0.0
@@ -102,6 +104,9 @@ def portfolio(
     rows.sort(key=lambda r: r["value"] or 0.0, reverse=True)
 
     unrealized = market_value - cost_basis if rows else 0.0
+    # Everything the ledger did to the cash side: negative while the money is
+    # in shares, rising as sales and dividends bring it back.
+    cash = sum(e.cash_flow for e in transactions_store.list_transactions(db, account_id=account))
     return {
         "holdings": rows,
         "count": len(rows),
@@ -111,6 +116,8 @@ def portfolio(
         "pnl_abs": unrealized,
         "pnl_pct": (unrealized / cost_basis * 100.0) if cost_basis else None,
         "realized_pnl": realized,
+        "cash": round(cash, 4),
+        "total_result": round(market_value + cash, 4),
         "dividends": dividends,
         "fees": fees,
         "unpriced": missing,
@@ -141,6 +148,10 @@ def history(
         "day": [p["day"] for p in points],
         "market_value": [p["market_value"] for p in points],
         "cost_basis": [p["cost_basis"] for p in points],
+        # Holdings plus the cash the ledger has produced. Selling moves money
+        # from one to the other, so this line does not step down on a sale.
+        "cash": [p["cash"] for p in points],
+        "total": [p["total"] for p in points],
         "pnl_pct": [p["pnl_pct"] for p in points],
     }
 
