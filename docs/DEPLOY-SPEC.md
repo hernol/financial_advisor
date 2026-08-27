@@ -152,11 +152,29 @@ Ya hay una función `sync_identity()` que hace el `setval`; confirmar que corre.
 
 ### Fase 2 — HTTPS
 
+**Ya hecho** (2026-08-27, commit `293b01b`), la parte de exposición y token:
+
+- `compose.yaml` sigue publicando en `127.0.0.1:8000`: privado por defecto, para
+  que un clon nuevo no pueda servir la cartera de alguien a su red sin querer.
+- `compose.lan.yaml` es una overlay opcional que abre el puerto a toda la red
+  **y exige `FA_API_TOKEN` en el mismo movimiento** (`${FA_API_TOKEN:?...}`), así
+  que `docker compose up` falla en seco si falta. Se activa por comando con
+  `-f compose.yaml -f compose.lan.yaml`, o de una vez con
+  `COMPOSE_FILE=compose.yaml:compose.lan.yaml` en el `.env`.
+- Dos trampas ya resueltas, para no repetirlas en el servidor: compose interpola
+  el archivo entero sin importar qué servicio corras (una variable obligatoria en
+  `compose.yaml` rompe el CLI, que no usa token), y las listas de `ports` se
+  **concatenan** entre archivos en vez de reemplazarse — de ahí `ports: !override`
+  en la overlay.
+
+El chequeo que se niega a escuchar en la red sin token vive en `fa/cli.py` y se
+apaga dentro de un contenedor a propósito: ahí la dirección de bind no dice nada
+sobre quién llega, y el mapeo que sí decide es invisible desde adentro. Por eso
+la exigencia va en compose, que es la capa que ve la exposición.
+
+**Falta**: el HTTPS en sí.
+
 - Dominio propio y Caddy delante de uvicorn (certificado automático).
-- **Antes de exponer nada**: poner `FA_API_TOKEN`. Hoy `compose.yaml` publica en
-  `127.0.0.1:8000` justamente para que no quede abierto por accidente; al cambiar
-  el mapeo, ese token deja de ser opcional.
-- El arranque ya avisa por log cuando corre sin autenticación. No ignorarlo.
 
 *Listo cuando*: `https://dominio/api/health` responde con certificado válido y
 sin token devuelve 401.
@@ -164,6 +182,10 @@ sin token devuelve 401.
 ### Fase 3 — Instalable en el teléfono
 
 Con HTTPS, la PWA ya se instala: el manifest y el service worker están hechos.
+
+Verificado el 2026-08-27 con la app servida por HTTP en la LAN: el navegador
+reporta `isSecureContext: false` y el service worker no registra. O sea que la
+Fase 3 **no arranca** hasta que esté la 2 — no es cuestión de configurar mejor.
 
 - Verificar "Agregar a pantalla de inicio" en Chrome Android.
 - Íconos PNG además del SVG actual (Play Store los exige en varios tamaños).
