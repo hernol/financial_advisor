@@ -56,13 +56,10 @@ services:
   # The dashboard: API plus the web app on one port.
   #   docker compose up -d dashboard   →   http://localhost:8000
   #
-  # Published on every interface so the phone can reach it over the LAN. The
-  # port mapping is what decides who can get in, not the address the process
-  # binds inside the container — so this line is the one that matters.
-  #
-  # FA_API_TOKEN is not optional with this mapping: without it anyone on the
-  # network can read and change the portfolio. The server prints a warning on
-  # startup when it is missing; do not ignore it.
+  # Published on 127.0.0.1: private by default, so a fresh clone cannot serve
+  # somebody's portfolio to their whole network by accident. To reach it from
+  # the phone, add the LAN overlay — see compose.lan.yaml, which flips the
+  # mapping and makes the token mandatory in the same move.
   dashboard:
     <<: *host-user
     build: .
@@ -71,7 +68,7 @@ services:
     command: ["serve", "--host", "0.0.0.0", "--port", "8000"]
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment: *app-env
     extra_hosts:
       - "host.docker.internal:host-gateway"

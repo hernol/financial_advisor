@@ -1,0 +1,31 @@
+# Overlay that publishes the dashboard to the local network.
+#
+#   docker compose -f compose.yaml -f compose.lan.yaml up -d dashboard
+#
+# Or set this once in the .env and forget it:
+#
+#   COMPOSE_FILE=compose.yaml:compose.lan.yaml
+#
+# Why a separate file rather than a flag in compose.yaml: compose interpolates
+# the whole file no matter which service you run, so a required variable here
+# would make `docker compose run --rm analyzer` demand a token the CLI never
+# uses. Keeping the exposure opt-in means a fresh clone is private by default
+# and the terminal keeps working with no configuration at all.
+services:
+  dashboard:
+    # !override, not a plain list: compose *concatenates* port lists across
+    # files, so without it the loopback mapping from compose.yaml survives and
+    # the container tries to bind 8000 twice, failing with "address already in
+    # use". The overlay has to replace the mapping, not add to it.
+    ports: !override
+      # Every interface. This line, not the address the process binds inside
+      # the container, is what decides who can reach the dashboard.
+      - "8000:8000"
+    environment:
+      # Mandatory here and nowhere else. The server already refuses to listen
+      # on the network without a token, but that check switches off inside a
+      # container — there the bind address says nothing about exposure and the
+      # process cannot see the mapping. This file can, so it enforces it:
+      # `docker compose up` fails instead of quietly serving the portfolio to
+      # anyone on the wifi.
+      FA_API_TOKEN: ${FA_API_TOKEN:?falta FA_API_TOKEN en el .env - esta overlay publica el dashboard en toda la red y sin token cualquiera puede leer y modificar la cartera. Genera uno con - python -c "import secrets;print(secrets.token_urlsafe(24))"}
