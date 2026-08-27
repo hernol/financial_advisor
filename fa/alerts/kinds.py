@@ -170,12 +170,21 @@ CATALOGUE: dict[str, AlertKind] = {
     MACD_CROSS: AlertKind(
         key=MACD_CROSS,
         label="Cruce de MACD",
-        description="Avisa cuando la línea MACD cruza su señal en la última rueda.",
-        defaults={"fast": 12, "slow": 26, "signal": 9, "direction": "any"},
+        description=(
+            "Avisa cuando la línea MACD cruza su señal en la última rueda, si el "
+            "cruce tiene cuerpo. min_strength mide la separación entre las líneas "
+            "en unidades del movimiento diario típico del papel: 0.02 descarta el "
+            "cuarto más flojo de los cruces, 0 avisa de todos."
+        ),
+        defaults={
+            "fast": 12, "slow": 26, "signal": 9, "direction": "any",
+            "min_strength": 0.02,
+        },
     ),
 }
 
 NUMERIC_FIELDS = {
+    "min_strength",
     "pct",
     "price",
     "days",
