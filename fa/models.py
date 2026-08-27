@@ -83,6 +83,10 @@ class Fundamentals:
     quarterly: Sequence[Mapping[str, Any]]
     shares_outstanding: float | None
     source: str
+    # The currency the statements are reported in, which is not always the one
+    # the share trades in: TSMC reports in TWD and its ADR trades in USD. Empty
+    # when the provider did not say, in which case nothing can be assumed.
+    currency: str = ""
 
 
 @dataclass(frozen=True)

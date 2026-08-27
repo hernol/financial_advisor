@@ -1444,12 +1444,21 @@ function paintFundamentals(body) {
   if (period.stale && period.rows.length) bits.push('Conviene actualizar.');
   $('fund-note').textContent = bits.join(' · ');
 
-  const warn = $('fund-warn');
-  warn.hidden = !body.net_debt_estimated;
-  if (body.net_debt_estimated) {
-    warn.textContent = 'En algún período el proveedor no reportó deuda total y caja: '
-      + 'ahí la deuda neta es una estimación, y el EV y su yield la heredan.';
+  // Two different caveats can apply at once, and each explains a different set
+  // of blanks, so neither can silently replace the other.
+  const warnings = [];
+  if (body.currency_mismatch) {
+    warnings.push('Los estados contables están en otra moneda que la acción: '
+      + 'P/E, PEG, EPS, FCF yield y EV quedan en blanco en vez de mal. '
+      + 'Los márgenes y el crecimiento siguen siendo válidos.');
   }
+  if (body.net_debt_estimated) {
+    warnings.push('En algún período el proveedor no reportó deuda total y caja: '
+      + 'ahí la deuda neta es una estimación, y el EV y su yield la heredan.');
+  }
+  const warn = $('fund-warn');
+  warn.hidden = warnings.length === 0;
+  warn.textContent = warnings.join(' ');
 }
 
 async function loadFundamentals() {

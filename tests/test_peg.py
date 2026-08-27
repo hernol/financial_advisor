@@ -116,3 +116,80 @@ def test_the_growth_rate_sits_next_to_the_peg_it_produced():
     894% one-year swing looks like the cheapest stock ever listed."""
     assert SUMMARY_COLUMNS.index("Earnings_Growth") == SUMMARY_COLUMNS.index("PEG") - 1
     assert "Earnings_Growth" not in QUALITY_COLUMNS
+
+
+# --- statements and quote in different currencies ---------------------------
+
+
+def mixed(rows, **kw):
+    return frame_to_rows(
+        frame(rows, **kw)
+    )
+
+
+def test_a_foreign_currency_statement_blanks_the_price_derived_ratios():
+    """TSMC reports in TWD and its ADR trades in USD. Dividing one by the other
+    gave a P/E of 0.93 against a real ~28 — the exchange rate wearing a metric's
+    name."""
+    rows = [year("2024", 1000.0, 100.0), year("2025", 1300.0, 125.0)]
+    history = [PricePoint(day=date(2025, 12, 31), close=30.0)]
+    row = frame_to_rows(
+        build_frame(rows, history, 50.0, 30.0,
+                    statement_currency="TWD", quote_currency="USD")
+    )[-1]
+    assert row["PE"] is None
+    assert row["PEG"] is None
+    assert row["EPS"] is None
+    assert row["FCF_Yield"] is None
+    assert row["EV"] is None
+    assert row["Currency_Mismatch"] is True
+
+
+def test_the_ratios_that_never_crossed_currencies_survive():
+    """Both sides of a margin are in the same money, so it was never wrong."""
+    rows = [year("2024", 1000.0, 100.0), year("2025", 1300.0, 125.0)]
+    history = [PricePoint(day=date(2025, 12, 31), close=30.0)]
+    row = frame_to_rows(
+        build_frame(rows, history, 50.0, 30.0,
+                    statement_currency="TWD", quote_currency="USD")
+    )[-1]
+    assert row["Net_Margin"] == pytest.approx(9.615, rel=1e-3)
+    assert row["Earnings_Growth"] == pytest.approx(25.0)
+    assert row["Revenue"] == pytest.approx(1300.0)
+
+
+def test_the_same_currency_changes_nothing():
+    rows = [year("2024", 1000.0, 100.0), year("2025", 1300.0, 125.0)]
+    history = [PricePoint(day=date(2025, 12, 31), close=30.0)]
+    row = frame_to_rows(
+        build_frame(rows, history, 50.0, 30.0,
+                    statement_currency="USD", quote_currency="USD")
+    )[-1]
+    assert row["PE"] == pytest.approx(12.0)
+    assert row["Currency_Mismatch"] is False
+
+
+def test_an_unknown_currency_is_not_treated_as_a_mismatch():
+    """Blanking on a guess would hide figures that are almost certainly fine.
+    Most providers say nothing and most companies report in their quote
+    currency."""
+    rows = [year("2024", 1000.0, 100.0), year("2025", 1300.0, 125.0)]
+    history = [PricePoint(day=date(2025, 12, 31), close=30.0)]
+    row = frame_to_rows(
+        build_frame(rows, history, 50.0, 30.0, statement_currency="", quote_currency="USD")
+    )[-1]
+    assert row["PE"] == pytest.approx(12.0)
+    assert row["Currency_Mismatch"] is False
+
+
+def test_the_ai_payload_carries_the_caveat():
+    """The model reads the tables; blanks with no explanation invite it to
+    speculate about why they are empty."""
+    from fa.metrics import to_payload
+
+    rows = [year("2024", 1000.0, 100.0), year("2025", 1300.0, 125.0)]
+    history = [PricePoint(day=date(2025, 12, 31), close=30.0)]
+    tweaked = build_frame(rows, history, 50.0, 30.0,
+                          statement_currency="TWD", quote_currency="USD")
+    text = to_payload(tweaked, tweaked, "yahoo")
+    assert "different currency" in text

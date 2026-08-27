@@ -338,6 +338,11 @@ def ticker_fundamentals(
         for period in periods.values()
         for row in period["rows"]
     )
+    mixed_currency = any(
+        row.get("Currency_Mismatch")
+        for period in periods.values()
+        for row in period["rows"]
+    )
     return {
         "ticker": symbol,
         "summary_columns": SUMMARY_FIELDS,
@@ -347,6 +352,10 @@ def ticker_fundamentals(
         # The proxy is a real number with a caveat, and the caveat has to travel
         # with it: an estimated net debt propagates into EV and its yield.
         "net_debt_estimated": bool(estimated),
+        # The statements are in a currency the share does not trade in, so the
+        # price-derived ratios are blank on purpose. Saying nothing would leave
+        # the gaps looking like missing data.
+        "currency_mismatch": bool(mixed_currency),
     }
 
 

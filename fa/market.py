@@ -157,5 +157,12 @@ class MarketService:
         """
         context = self.context(ticker, since=since, period=ANALYSIS_HISTORY_PERIOD)
         fundamentals = self._chain.get_fundamentals(ticker)
-        annual, quarterly = build_tables(fundamentals, context.history, context.quote.price)
+        # The quote knows what money it is in; without handing that over, the
+        # tables cannot tell a TWD statement from a USD one.
+        annual, quarterly = build_tables(
+            fundamentals,
+            context.history,
+            context.quote.price,
+            quote_currency=context.quote.currency,
+        )
         return annual, quarterly, fundamentals, context

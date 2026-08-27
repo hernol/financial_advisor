@@ -126,6 +126,7 @@ class YahooProvider:
             quarterly=quarterly,
             shares_outstanding=self._shares(handle),
             source=NAME,
+            currency=self._statement_currency(handle),
         )
 
     def _statement_rows(self, handle: Any, *, quarterly: bool) -> list[dict[str, Any]]:
@@ -159,6 +160,19 @@ class YahooProvider:
                 row[key] = to_millions(pick(income_col, aliases))
             rows.append(row)
         return rows[-6:]
+
+    def _statement_currency(self, handle: Any) -> str:
+        """What the financial statements are denominated in.
+
+        Distinct from the quote currency. Yahoo reports both and they differ for
+        every foreign company with a US listing; without this the price and the
+        statements get divided by each other as if they were the same money.
+        """
+        try:
+            value = handle.info.get("financialCurrency")
+        except Exception:  # noqa: BLE001 - a missing blob means unknown, not broken
+            return ""
+        return str(value).upper() if value else ""
 
     def _shares(self, handle: Any) -> float | None:
         for attribute in ("fast_info", "info"):

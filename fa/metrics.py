@@ -25,6 +25,7 @@ COLUMNS = [
     "Cash",
     "Net_Debt",
     "Net_Debt_Estimated",
+    "Currency_Mismatch",
     "Operating_Cash_Flow",
     "CapEx",
     "FCF",
@@ -85,8 +86,29 @@ def build_frame(
     history: Sequence[PricePoint],
     shares_outstanding: float | None,
     current_price: float,
+    *,
+    statement_currency: str = "",
+    quote_currency: str = "",
 ) -> pd.DataFrame:
-    """Turn provider rows into the derived-metrics table (values in millions)."""
+    """Turn provider rows into the derived-metrics table (values in millions).
+
+    When the statements and the quote are in different currencies, every ratio
+    that divides one by the other is left blank. TSMC reports in TWD and its ADR
+    trades in USD: the arithmetic gave a P/E of 0.93 against a real ~28, and an
+    FCF yield of 63% against a real ~2%. Those are not approximations, they are
+    the exchange rate wearing a metric's name.
+
+    Converting instead was the alternative and it is worse: today's rate applied
+    to a 2023 balance sheet invents a precision nobody has, and this codebase
+    does not manufacture numbers. Blank says "unknown", which is true.
+    """
+    # Unknown on either side is not a mismatch: nothing can be concluded, and
+    # blanking on a guess would hide figures that are probably fine.
+    mixed = bool(
+        statement_currency
+        and quote_currency
+        and statement_currency.upper() != quote_currency.upper()
+    )
     records: list[dict[str, Any]] = []
     previous_revenue: float | None = None
     previous_net_income: float | None = None
@@ -113,6 +135,11 @@ def build_frame(
         earnings_per_share = ratios.eps(net_income, shares_outstanding)
         pe = ratios.price_earnings(price, earnings_per_share)
         earnings_growth = ratios.growth_pct(net_income, previous_net_income)
+        if mixed:
+            # Everything downstream of a price divided by a statement line.
+            # Growth and the margins survive: both sides of those are in the
+            # same money, so they were never affected.
+            market_cap = ev = earnings_per_share = pe = None
         records.append(
             {
                 "Period": row.get("label", ""),
@@ -126,6 +153,7 @@ def build_frame(
                 "Cash": row.get("cash"),
                 "Net_Debt": debt_value,
                 "Net_Debt_Estimated": estimated,
+                "Currency_Mismatch": mixed,
                 "Operating_Cash_Flow": ocf,
                 "CapEx": capex,
                 "FCF": fcf,
@@ -165,20 +193,36 @@ def _yield(numerator: float | None, denominator: float | None) -> float | None:
 
 
 def build_tables(
-    fundamentals: Fundamentals, history: Sequence[PricePoint], current_price: float
+    fundamentals: Fundamentals,
+    history: Sequence[PricePoint],
+    current_price: float,
+    *,
+    quote_currency: str = "",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Annual and quarterly metric tables for a ticker."""
     shares = fundamentals.shares_outstanding
-    annual = build_frame(fundamentals.annual, history, shares, current_price)
-    quarterly = build_frame(fundamentals.quarterly, history, shares, current_price)
+    kwargs = {
+        "statement_currency": fundamentals.currency,
+        "quote_currency": quote_currency,
+    }
+    annual = build_frame(fundamentals.annual, history, shares, current_price, **kwargs)
+    quarterly = build_frame(fundamentals.quarterly, history, shares, current_price, **kwargs)
     return annual, quarterly
 
 
 def to_payload(annual: pd.DataFrame, quarterly: pd.DataFrame, source: str) -> str:
     """Plain-text rendering handed to the AI analyst."""
     note = ""
+    if _has_currency_mismatch(annual) or _has_currency_mismatch(quarterly):
+        note += (
+            "\nNOTE: the statements are reported in a different currency than the share "
+            "trades in, so every price-derived ratio (P/E, PEG, EPS, FCF yield, EV) is blank "
+            "rather than wrong. Do not compare the absolute figures to the share price.\n"
+        )
     if _has_estimated_debt(annual) or _has_estimated_debt(quarterly):
-        note = (
+        # Appended, not assigned: both caveats can apply to the same ticker and
+        # each explains a different set of numbers.
+        note += (
             "\nNOTE: the vendor did not report total debt and cash for some periods, so Net_Debt "
             f"there is a rough estimate ({int(NET_DEBT_RATIO * 100)}% of total liabilities) and "
             "every EV-based figure inherits that approximation.\n"
@@ -189,6 +233,10 @@ def to_payload(annual: pd.DataFrame, quarterly: pd.DataFrame, source: str) -> st
         f"--- QUARTERLY DATA (source: {source}, figures in millions) ---\n"
         f"{quarterly.to_string(index=False)}\n{note}"
     )
+
+
+def _has_currency_mismatch(frame: pd.DataFrame) -> bool:
+    return "Currency_Mismatch" in frame.columns and bool(frame["Currency_Mismatch"].any())
 
 
 def _has_estimated_debt(frame: pd.DataFrame) -> bool:
