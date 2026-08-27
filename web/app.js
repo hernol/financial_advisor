@@ -1356,6 +1356,13 @@ const METRIC = {
   Net_Debt:          { label: 'Deuda neta', kind: 'millions', inverted: true },
   FCF_Yield:         { label: 'FCF yield', kind: 'pct', signed: true },
   EV_FCF_Yield:      { label: 'EV/FCF yield', kind: 'pct', signed: true },
+  EPS:               { label: 'Ganancia por acción', kind: 'ratio', signed: true },
+  PE:                { label: 'P/E', kind: 'ratio' },
+  // "PEG" alone would read as the textbook one, which divides by *forecast*
+  // growth. This divides by the growth that already happened, and the label is
+  // the only place a reader can find that out.
+  PEG:               { label: 'PEG (crec. pasado)', kind: 'ratio' },
+  Earnings_Growth:   { label: 'Crec. ganancias', kind: 'pct', signed: true },
   Gross_Margin:      { label: 'Margen bruto', kind: 'pct' },
   Operating_Margin:  { label: 'Margen operativo', kind: 'pct', signed: true },
   Net_Margin:        { label: 'Margen neto', kind: 'pct', signed: true },

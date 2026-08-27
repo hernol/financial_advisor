@@ -52,6 +52,42 @@ def growth_pct(current: float | None, previous: float | None) -> float | None:
     return (current - previous) / previous * 100.0
 
 
+def eps(net_income: float | None, shares: float | None) -> float | None:
+    """Earnings per share. Negative when the company lost money, which is real."""
+    if net_income is None or not shares:
+        return None
+    return net_income / shares
+
+
+def price_earnings(price: float | None, earnings_per_share: float | None) -> float | None:
+    """P/E, only where it means something.
+
+    A company that lost money has no P/E: the arithmetic yields a negative
+    number that sorts as "cheap" next to real ones, which is worse than a blank.
+    """
+    if price is None or earnings_per_share is None or earnings_per_share <= 0:
+        return None
+    return price / earnings_per_share
+
+
+def peg(price_earnings_ratio: float | None, growth: float | None) -> float | None:
+    """P/E divided by the earnings growth rate, in percentage points.
+
+    Undefined unless growth is positive. Dividing by a contraction produces a
+    negative PEG, and a negative PEG reads as the cheapest thing on the screen
+    while describing a company whose earnings are shrinking — the exact opposite
+    of what the number is for. Blank is the honest answer.
+
+    Note this is a *trailing* PEG: it divides by growth that already happened,
+    because that is what the statements report. The textbook PEG uses forecast
+    growth, which needs analyst estimates no provider here supplies. The two are
+    not interchangeable and the UI has to say which one it is showing.
+    """
+    if price_earnings_ratio is None or growth is None or growth <= 0:
+        return None
+    return price_earnings_ratio / growth
+
+
 def interest_coverage(operating_income: float | None, interest_expense: float | None) -> float | None:
     """Times the operating profit covers the interest bill."""
     if operating_income is None or not interest_expense:

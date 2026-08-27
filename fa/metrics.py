@@ -35,6 +35,10 @@ COLUMNS = [
     "EV",
     "FCF_Yield",
     "EV_FCF_Yield",
+    "EPS",
+    "PE",
+    "Earnings_Growth",
+    "PEG",
     "Gross_Margin",
     "Operating_Margin",
     "Net_Margin",
@@ -52,6 +56,9 @@ SUMMARY_COLUMNS = [
     "Net_Debt",
     "FCF_Yield",
     "EV_FCF_Yield",
+    "PE",
+    "Earnings_Growth",
+    "PEG",
 ]
 
 QUALITY_COLUMNS = [
@@ -82,6 +89,7 @@ def build_frame(
     """Turn provider rows into the derived-metrics table (values in millions)."""
     records: list[dict[str, Any]] = []
     previous_revenue: float | None = None
+    previous_net_income: float | None = None
     for row in rows:
         period_end = row.get("period_end")
         price = close_on_or_before(history, period_end) if period_end else None
@@ -99,6 +107,12 @@ def build_frame(
         market_cap = None if shares_outstanding is None else shares_outstanding * price
         debt_value, estimated = ratios.net_debt(row.get("total_debt"), row.get("cash"), liabilities)
         ev = None if market_cap is None or debt_value is None else market_cap + debt_value
+        # PEG is built here rather than in the frame afterwards because both of
+        # its halves are period-local: the P/E uses the price as at that period
+        # end, not today's.
+        earnings_per_share = ratios.eps(net_income, shares_outstanding)
+        pe = ratios.price_earnings(price, earnings_per_share)
+        earnings_growth = ratios.growth_pct(net_income, previous_net_income)
         records.append(
             {
                 "Period": row.get("label", ""),
@@ -122,6 +136,10 @@ def build_frame(
                 "EV": ev,
                 "FCF_Yield": _yield(fcf, market_cap),
                 "EV_FCF_Yield": _yield(fcf, ev),
+                "EPS": earnings_per_share,
+                "PE": pe,
+                "Earnings_Growth": earnings_growth,
+                "PEG": ratios.peg(pe, earnings_growth),
                 "Gross_Margin": ratios.margin(row.get("gross_profit"), revenue),
                 "Operating_Margin": ratios.margin(operating_income, revenue),
                 "Net_Margin": ratios.margin(net_income, revenue),
@@ -135,6 +153,7 @@ def build_frame(
             }
         )
         previous_revenue = revenue if revenue is not None else previous_revenue
+        previous_net_income = net_income if net_income is not None else previous_net_income
     frame = pd.DataFrame(records, columns=COLUMNS)
     return frame
 
