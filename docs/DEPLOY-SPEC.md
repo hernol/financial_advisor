@@ -1,7 +1,10 @@
 # Spec: mover el backend a un servidor y llegar al APK
 
-Documento de trabajo para continuar en otra sesión. Escrito el 2026-08-26,
-actualizado el 2026-08-28 contra el commit `598c277` de `main`.
+Documento de trabajo. Escrito el 2026-08-26, desplegado el 2026-08-28.
+
+> **Estado: andando en https://hernol.com.ar.** Fases 0, 1 y 2 completas; la 3
+> quedó desbloqueada. Lo que sigue vale como registro de lo hecho y como guía
+> para las fases 3 a 5.
 
 **Objetivo final**: backend hosteado, clientes móviles, suscripciones.
 **Objetivo inmediato**: correr esto en un servidor propio, con un solo usuario
@@ -48,7 +51,20 @@ tests que corren en local no están probando la versión que corre en producció
 Alinear las dos, o al menos correr la suite dentro de la imagen antes de
 desplegar.
 
-### 2.3 El timer de alertas es por máquina, no por servicio
+### 2.3 El timer de alertas es por máquina, no por servicio — ✅ RESUELTO en el servidor
+
+Confirmado en el servidor: `Linger=no`, así que un timer `--user` moría al
+cerrar sesión. Ahora hay `fa-alerts@hernol.timer` a nivel de sistema
+(`scripts/systemd/`).
+
+Otra trampa que sólo aparece en un servidor: está en **UTC**, y `10..18` sin
+zona significaba 07:00-15:00 en Buenos Aires — antes de que abra el mercado y
+terminando antes del cierre que el chequeo existe para mirar. La zona va
+explícita en el `OnCalendar` (systemd 252+).
+
+Sigue pendiente el fan-out (un fetch por ticker, evaluación por cuenta), que es
+lo que importa recién con varias cuentas. El texto original:
+
 
 `scripts/setup-systemd.sh` instala un timer de systemd **en modo `--user`** que
 levanta un contenedor efímero con `check-alerts`. Sirve para una laptop, no para
@@ -198,6 +214,11 @@ secuencias no colisionan.
 *Listo cuando*: `migrate-db` dice que todas las tablas coinciden y
 `/api/portfolio` sobre el servidor devuelve las mismas cifras que tu laptop.
 
+**✅ HECHA el 2026-08-28.** Repo en `~/apps/financial_analyzer`, Postgres en
+Docker con volumen `db_data` y sin puerto publicado, 27.000 filas migradas y
+verificadas. `/api/portfolio` sobre el servidor devuelve exactamente las mismas
+cifras que la laptop.
+
 ### Fase 2 — HTTPS
 
 **Ya hecho** (2026-08-27, commit `293b01b`), la parte de exposición y token:
@@ -227,6 +248,21 @@ la exigencia va en compose, que es la capa que ve la exposición.
 *Listo cuando*: `https://dominio/api/health` responde con certificado válido y
 sin token devuelve 401.
 
+**✅ HECHA el 2026-08-28.** nginx en `compose.proxy.yaml`, un archivo por dominio
+en `proxy/conf.d/`. Reusa el certificado de certbot en vez de pedir el suyo:
+ese certificado también lo usan postfix y dovecot, y dos clientes ACME peleando
+por el mismo nombre es problema seguro.
+
+Y arregló algo que ya estaba roto: la renovación es por `webroot` sobre
+`/var/www/html` y **no había nada escuchando en el 80**, así que la próxima
+renovación iba a fallar y llevarse el TLS del mail. Verificado con
+`certbot renew --dry-run` → *"all simulated renewals succeeded"*. El hook de
+recarga vive en `/etc/letsencrypt/renewal-hooks/deploy/`, un drop-in que no
+toca el `.conf` que usa el mail.
+
+Bloques por defecto en 80 y 443 devuelven 444: un dominio que alguien apunte a
+la IP no cae en la cartera de nadie.
+
 ### Fase 3 — Instalable en el teléfono
 
 Con HTTPS, la PWA ya se instala: el manifest y el service worker están hechos.
@@ -234,6 +270,10 @@ Con HTTPS, la PWA ya se instala: el manifest y el service worker están hechos.
 Verificado el 2026-08-27 con la app servida por HTTP en la LAN: el navegador
 reporta `isSecureContext: false` y el service worker no registra. O sea que la
 Fase 3 **no arranca** hasta que esté la 2 — no es cuestión de configurar mejor.
+
+**Desbloqueada el 2026-08-28.** Sobre `https://hernol.com.ar` el navegador
+reporta `isSecureContext: true` y el service worker registra. Falta: íconos PNG,
+`assetlinks.json` en `/.well-known/`, y Bubblewrap para generar el APK.
 
 - Verificar "Agregar a pantalla de inicio" en Chrome Android.
 - Íconos PNG además del SVG actual (Play Store los exige en varios tamaños).
