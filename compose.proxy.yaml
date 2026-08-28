@@ -1,0 +1,40 @@
+# nginx delante de todo, en 80 y 443.
+#
+#   docker compose -f compose.yaml -f compose.server.yaml -f compose.proxy.yaml up -d
+#
+# Pensado para varios sitios: un archivo por dominio en proxy/conf.d/. Agregar
+# otro es copiar el de hernol.com.ar, cambiarle el server_name, el certificado y
+# el proxy_pass, y recargar. Nada de este archivo cambia.
+#
+# El dashboard no publica su puerto acá: nginx lo alcanza por la red interna de
+# compose, así que la única puerta desde afuera es el proxy.
+services:
+  proxy:
+    image: nginx:1.27-alpine
+    container_name: financial_analyzer_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./proxy/conf.d:/etc/nginx/conf.d:ro
+      # Sólo lectura: el proxy usa los certificados del host, no los administra.
+      # certbot los renueva y sigue siendo el dueño.
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Donde certbot deja el desafío ACME. Sin esto la renovación falla, y ese
+      # certificado también lo usan postfix y dovecot.
+      - /var/www/html:/var/www/html:ro
+    depends_on:
+      - dashboard
+
+  dashboard:
+    # Detrás del proxy no hace falta publicar nada: se llega por la red de
+    # compose. Publicar además sería una segunda puerta sin TLS.
+    ports: !override []
+    # Los mapas de environment se fusionan entre archivos, así que esto se suma
+    # al bloque de compose.yaml en vez de reemplazarlo. (Las listas, como ports,
+    # se concatenan — por eso esa sí necesita !override.)
+    environment:
+      # El proxy sirve esto en internet. Sin token, cualquiera con la URL entra.
+      FA_API_TOKEN: ${FA_API_TOKEN:?falta FA_API_TOKEN en el .env - el proxy publica el dashboard en internet y sin token cualquiera puede leer y modificar la cartera. Genera uno con - python -c "import secrets;print(secrets.token_urlsafe(24))"}

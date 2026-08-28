@@ -284,7 +284,19 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         if exposed:
             print(f"   Abrilo desde el celular en esa misma URL. Modo de acceso: {mode}.")
     print(f"   Acceso: {mode}. Ctrl+C para cortar.")
-    uvicorn.run("fa.api.app:app", host=host, port=args.port, reload=args.reload)
+    # proxy_headers with a trusted-hosts wildcard: behind nginx every request
+    # arrives from the proxy, and without this the app sees its address and its
+    # scheme instead of the client's. The wildcard is safe only because nothing
+    # but the proxy can reach the port — on the server it is not published at
+    # all, and locally it is bound to loopback.
+    uvicorn.run(
+        "fa.api.app:app",
+        host=host,
+        port=args.port,
+        reload=args.reload,
+        proxy_headers=True,
+        forwarded_allow_ips="*",
+    )
     return 0
 
 
