@@ -603,8 +603,9 @@ function showGate(message = '') {
     fields.appendChild(field('email', 'Email', { type: 'email', required: true }));
     fields.appendChild(field('password', 'Contraseña', { type: 'password', required: true }));
   } else {
-    $('gate-lead').textContent =
-      'Este servidor pide un token. Está en el .env, en FA_API_TOKEN.';
+    // No dice dónde está el token: la pantalla de login es pública, y quien
+    // tenga que saberlo ya lo sabe.
+    $('gate-lead').textContent = 'Este servidor pide un token.';
     fields.appendChild(field('token', 'Token', { type: 'password', required: true }));
   }
   const first = fields.querySelector('input');
