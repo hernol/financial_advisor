@@ -1,0 +1,18 @@
+# Chequeo periódico de alertas, para un servidor.
+#
+# La variante --user de scripts/setup-systemd.sh sirve en una laptop, pero
+# necesita lingering habilitado o muere al cerrar sesión. En un servidor el
+# timer va a nivel de sistema y corre como el usuario dueño del repo, que es
+# quien está en el grupo docker.
+[Unit]
+Description=Financial Analyzer - evaluar alertas
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/home/%i/apps/financial_analyzer
+ExecStart=/usr/bin/docker compose run --rm alerts
+# Una corrida que se cuelga no debe bloquear la siguiente.
+TimeoutStartSec=900

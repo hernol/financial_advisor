@@ -1,0 +1,13 @@
+[Unit]
+Description=Financial Analyzer - chequeo horario de alertas
+
+[Timer]
+# Días hábiles, 10 a 18 hora local. Cubre la rueda de EEUU tanto en EDT como
+# en EST desde Buenos Aires (-03).
+OnCalendar=Mon-Fri 10..18:00:00
+# Si el servidor estuvo apagado a la hora prevista, corre al arrancar.
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
