@@ -2,9 +2,13 @@
 Description=Financial Analyzer - chequeo horario de alertas
 
 [Timer]
-# Días hábiles, 10 a 18 hora local. Cubre la rueda de EEUU tanto en EDT como
-# en EST desde Buenos Aires (-03).
-OnCalendar=Mon-Fri 10..18:00:00
+# Días hábiles, 10 a 18 hora de Buenos Aires: cubre la rueda de EEUU tanto en
+# EDT (10:30-17:00 local) como en EST (11:30-18:00 local).
+#
+# La zona va explícita porque un servidor casi siempre está en UTC, y ahí
+# "10..18" significa 07:00-15:00 en Buenos Aires — o sea, el chequeo se pierde
+# el cierre del mercado entero y corre antes de que abra. Requiere systemd 252+.
+OnCalendar=Mon-Fri 10..18:00:00 America/Argentina/Buenos_Aires
 # Si el servidor estuvo apagado a la hora prevista, corre al arrancar.
 Persistent=true
 RandomizedDelaySec=120
