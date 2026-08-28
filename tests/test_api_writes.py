@@ -73,7 +73,9 @@ def test_an_alert_is_created_with_the_catalogue_defaults(client, conn):
     response = client.post("/api/tickers/PODD/alerts", json={"kind": "rsi"})
     assert response.status_code == 201
     body = response.json()
-    assert body["params"] == {"period": 14, "overbought": 70.0, "oversold": 30.0}
+    assert body["params"] == {
+        "period": 14, "overbought": 70.0, "oversold": 30.0, "mode": "cross",
+    }
     assert body["ticker"] == "PODD"
     assert alerts_store.list_alerts(conn, ticker="PODD")
 

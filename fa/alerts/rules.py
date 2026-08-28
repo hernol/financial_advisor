@@ -142,24 +142,45 @@ def sma_cross(alert: Alert, ctx: MarketContext, position: Position | None) -> Si
 
 
 def rsi_bounds(alert: Alert, ctx: MarketContext, position: Position | None) -> Signal | None:
+    """Fire on the session the RSI crosses a threshold, not while it sits past it.
+
+    The old test was ``value >= overbought``, which is a state and not an event:
+    in a strong trend the RSI can hold above 70 for weeks, so the alert repeated
+    the same sentence every cooldown window and the reader learned to skip it.
+    Crossing happens once and means something — the thing being reported is the
+    moment the reading changed regime.
+
+    ``mode: "level"`` restores the old behaviour for anyone who wants the
+    standing reminder.
+    """
     period = int(alert.params.get("period", 14))
     value = rsi(ctx.closes, period)
     if value is None:
         return None
     overbought = float(alert.params.get("overbought", 70))
     oversold = float(alert.params.get("oversold", 30))
-    if value >= overbought:
+    by_level = str(alert.params.get("mode", "cross")) == "level"
+
+    # One session back. Without it there is no crossing to observe — only a
+    # position — so a first evaluation stays quiet rather than announcing a
+    # transition it never saw.
+    previous = rsi(ctx.closes[:-1], period) if len(ctx.closes) > period + 1 else None
+
+    if value >= overbought and (by_level or (previous is not None and previous < overbought)):
         state, severity = "sobrecompra", "warning"
-    elif value <= oversold:
+    elif value <= oversold and (by_level or (previous is not None and previous > oversold)):
         state, severity = "sobreventa", "info"
     else:
         return None
+
+    moved = "" if by_level or previous is None else f" (venía de {previous:.1f})"
     return _signal(
         alert,
         f"📊 {ctx.ticker} RSI {value:.1f} ({state})",
-        f"{ctx.ticker} tiene RSI({period}) = {value:.1f} → {state}. "
+        f"{ctx.ticker} tiene RSI({period}) = {value:.1f} → {state}{moved}. "
         f"Precio {ctx.quote.price:.2f} {ctx.quote.currency}.",
-        {"rsi": round(value, 2), "period": period, "state": state},
+        {"rsi": round(value, 2), "period": period, "state": state,
+         "previous_rsi": round(previous, 2) if previous is not None else None},
         severity=severity,
     )
 

@@ -101,8 +101,12 @@ CATALOGUE: dict[str, AlertKind] = {
     RSI: AlertKind(
         key=RSI,
         label="RSI sobrecompra/sobreventa",
-        description="Avisa cuando el RSI cruza los umbrales configurados.",
-        defaults={"period": 14, "overbought": 70.0, "oversold": 30.0},
+        description=(
+            "Avisa la rueda en que el RSI cruza un umbral, no mientras se queda "
+            'del otro lado. Con mode="level" avisa en cada chequeo mientras siga '
+            "pasado, que es como funcionaba antes."
+        ),
+        defaults={"period": 14, "overbought": 70.0, "oversold": 30.0, "mode": "cross"},
     ),
     DIVIDEND_EX_NEAR: AlertKind(
         key=DIVIDEND_EX_NEAR,
@@ -202,6 +206,9 @@ NUMERIC_FIELDS = {
 }
 INTEGER_FIELDS = {"fast", "slow", "signal", "period", "days", "months", "lookback_days"}
 WINDOWS = ("1m", "3m", "6m", "12m")
+# "cross" reports the session the reading changed regime; "level" repeats the
+# state for as long as it lasts, which is what this alert used to do.
+RSI_MODES = ("cross", "level")
 DIRECTIONS = ("any", "above", "below")
 
 
@@ -241,4 +248,11 @@ def normalize_params(key: str, params: Mapping[str, Any] | None) -> dict[str, An
         raise ValidationError("sma_break necesita dirección 'above' (hacia arriba) o 'below' (hacia abajo).")
     if key == MACD_CROSS and merged.get("direction") not in DIRECTIONS:
         raise ValidationError(f"La dirección tiene que ser una de: {', '.join(DIRECTIONS)}.")
+    if key == RSI and merged.get("mode") not in RSI_MODES:
+        raise ValidationError(
+            "El modo del RSI tiene que ser 'cross' (avisa al cruzar) o "
+            "'level' (avisa mientras siga pasado el umbral)."
+        )
+    if key == RSI and merged["oversold"] >= merged["overbought"]:
+        raise ValidationError("En rsi el umbral de sobreventa tiene que ser menor que el de sobrecompra.")
     return merged

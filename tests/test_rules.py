@@ -106,10 +106,19 @@ def test_sma_cross_ignores_the_opposite_direction():
     assert rules.evaluate(alert(kinds.SMA_CROSS, fast=2, slow=5, direction="death"), ctx, None) is None
 
 
-def test_rsi_fires_on_overbought():
+def test_rsi_reports_overbought_in_level_mode():
     ctx = make_context(20.0, history=make_history([float(i) for i in range(1, 25)]))
-    signal = rules.evaluate(alert(kinds.RSI, period=14), ctx, None)
+    signal = rules.evaluate(alert(kinds.RSI, period=14, mode="level"), ctx, None)
     assert signal is not None and signal.payload["state"] == "sobrecompra"
+
+
+def test_rsi_never_crossed_on_a_series_that_only_ever_rose():
+    """Straight up from the first bar: the reading was pinned at overbought
+    from the moment it could be computed, so there is no crossing to report.
+    The default mode says nothing, which is the difference between a state and
+    an event. See tests/test_rsi_cross.py for the crossing itself."""
+    ctx = make_context(20.0, history=make_history([float(i) for i in range(1, 25)]))
+    assert rules.evaluate(alert(kinds.RSI, period=14), ctx, None) is None
 
 
 def test_rsi_quiet_in_the_neutral_zone():
