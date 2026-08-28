@@ -142,6 +142,52 @@ def test_concepts_are_flattened_by_name():
     assert _concepts([{"concept": "Assets", "value": 10}]) == {"Assets": 10}
 
 
+def test_concepts_strip_the_taxonomy_prefix():
+    """Finnhub prefixes every concept, so the bare name never matched."""
+    assert _concepts([{"concept": "us-gaap_Assets", "value": 10}]) == {"Assets": 10}
+
+
+def test_concepts_keep_similarly_named_lines_apart():
+    flattened = _concepts(
+        [{"concept": "us-gaap_Assets", "value": 10}, {"concept": "us-gaap_AssetsCurrent", "value": 4}]
+    )
+    assert flattened == {"Assets": 10, "AssetsCurrent": 4}
+
+
+# One annual filing, shaped like the real financials-reported payload.
+REPORTED = {
+    "data": [
+        {
+            "endDate": "2025-09-30",
+            "report": {
+                "bs": [
+                    {"concept": "us-gaap_AssetsCurrent", "value": 147957000000},
+                    {"concept": "us-gaap_Assets", "value": 359241000000},
+                    {"concept": "us-gaap_Liabilities", "value": 285508000000},
+                ],
+                "cf": [
+                    {"concept": "us-gaap_NetCashProvidedByUsedInOperatingActivities", "value": 111482000000},
+                    {"concept": "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment", "value": 12715000000},
+                ],
+            },
+        }
+    ]
+}
+
+
+def test_finnhub_reads_the_prefixed_statement_concepts(monkeypatch):
+    provider = FinnhubProvider("key")
+    monkeypatch.setattr("fa.providers.finnhub.get_json", lambda *a, **k: REPORTED)
+
+    row = provider.get_fundamentals("AAPL").annual[0]
+
+    # Assets, not AssetsCurrent: the longer line must not win the lookup.
+    assert row["total_assets"] == pytest.approx(359241.0)
+    assert row["total_liabilities"] == pytest.approx(285508.0)
+    assert row["operating_cash_flow"] == pytest.approx(111482.0)
+    assert row["capex"] == pytest.approx(12715.0)
+
+
 def test_first_returns_the_first_known_concept():
     assert _first({"CapitalExpenditures": 3}, ("PaymentsToAcquire", "CapitalExpenditures")) == 3
 

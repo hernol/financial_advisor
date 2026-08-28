@@ -167,7 +167,20 @@ class FinnhubProvider:
 
 
 def _concepts(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    return {str(item.get("concept")): item.get("value") for item in items if item.get("concept")}
+    """Index a statement by local concept name, dropping the taxonomy prefix.
+
+    Finnhub reports concepts qualified — ``us-gaap_Assets``, and ``ifrs-full_``
+    for foreign filers — so matching CONCEPTS against the raw string never hit
+    and every figure came back empty. The comparison stays on the whole local
+    name, never a substring: ``AssetsCurrent`` is a different line from
+    ``Assets`` and must not answer for it.
+    """
+    flattened: dict[str, Any] = {}
+    for item in items:
+        concept = item.get("concept")
+        if concept:
+            flattened[str(concept).split("_", 1)[-1]] = item.get("value")
+    return flattened
 
 
 def _first(source: Mapping[str, Any], keys: Sequence[str]) -> Any:
