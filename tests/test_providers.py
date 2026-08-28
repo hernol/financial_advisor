@@ -1,6 +1,7 @@
 """Provider payload parsing, exercised with canned vendor responses."""
 from __future__ import annotations
 
+import time
 from datetime import date, datetime
 
 import pandas as pd
@@ -41,6 +42,13 @@ def test_quarter_label_matches_the_calendar_quarter():
 
 # --- Alpha Vantage ----------------------------------------------------------
 
+
+def _refuses(*args, **kwargs):
+    """Stand-in for a provider that rejects the key on every endpoint."""
+    raise ProviderError("HTTP request failed: HTTP Error 401: Unauthorized")
+
+
+
 BALANCE = [{"fiscalDateEnding": "2025-12-31", "totalAssets": "3100000000", "totalLiabilities": "1720000000"}]
 CASH = [{"fiscalDateEnding": "2025-12-31", "operatingCashflow": "440000000", "capitalExpenditures": "-62000000"}]
 
@@ -71,6 +79,45 @@ def test_alphavantage_surfaces_rate_limit_notes(monkeypatch):
     monkeypatch.setattr("fa.providers.alphavantage.get_json", lambda *a, **k: {"Note": "rate limited"})
     with pytest.raises(ProviderError, match="rate limited"):
         provider.get_quote("PODD")
+
+
+def test_alphavantage_spaces_requests_for_the_one_per_second_limit(monkeypatch):
+    """Fundamentals needs three calls; free keys reject them fired back to back."""
+    provider = AlphaVantageProvider("key")
+    slept: list[float] = []
+    monkeypatch.setattr(time, "sleep", slept.append)
+    monkeypatch.setattr(
+        "fa.providers.alphavantage.get_json", lambda *a, **k: {"annualReports": BALANCE}
+    )
+
+    provider.get_fundamentals("PODD")
+
+    # BALANCE_SHEET, CASH_FLOW and OVERVIEW: the first goes straight out, the
+    # other two wait.
+    assert len(slept) == 2
+    assert all(pause >= 1.0 for pause in slept)
+
+
+def test_alphavantage_reports_a_failed_earnings_lookup(monkeypatch):
+    provider = AlphaVantageProvider("key")
+    monkeypatch.setattr("fa.providers.alphavantage.get_json", _refuses)
+    with pytest.raises(ProviderError):
+        provider.get_next_earnings("PODD")
+
+
+def test_alphavantage_reports_a_failed_dividend_lookup(monkeypatch):
+    """A rejected key must not read as \"this ticker pays no dividend\"."""
+    provider = AlphaVantageProvider("key")
+    monkeypatch.setattr("fa.providers.alphavantage.get_json", _refuses)
+    with pytest.raises(ProviderError):
+        provider.get_next_ex_dividend("PODD")
+
+
+def test_alphavantage_reports_a_failed_splits_lookup(monkeypatch):
+    provider = AlphaVantageProvider("key")
+    monkeypatch.setattr("fa.providers.alphavantage.get_json", _refuses)
+    with pytest.raises(ProviderError):
+        provider.get_splits("PODD", date(2026, 1, 1))
 
 
 def test_alphavantage_parses_a_global_quote(monkeypatch):
@@ -106,6 +153,21 @@ def test_period_to_days_converts_the_window():
 
 def test_finnhub_needs_a_key():
     assert FinnhubProvider(None).available() is False
+
+
+def test_finnhub_reports_a_failed_dividend_lookup(monkeypatch):
+    """A rejected key must not read as \"this ticker pays no dividend\"."""
+    provider = FinnhubProvider("key")
+    monkeypatch.setattr("fa.providers.finnhub.get_json", _refuses)
+    with pytest.raises(ProviderError):
+        provider.get_next_ex_dividend("PODD")
+
+
+def test_finnhub_reports_a_failed_splits_lookup(monkeypatch):
+    provider = FinnhubProvider("key")
+    monkeypatch.setattr("fa.providers.finnhub.get_json", _refuses)
+    with pytest.raises(ProviderError):
+        provider.get_splits("PODD", date(2026, 1, 1))
 
 
 def test_finnhub_parses_a_quote(monkeypatch):

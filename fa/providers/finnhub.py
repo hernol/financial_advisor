@@ -138,26 +138,20 @@ class FinnhubProvider:
 
     def get_next_ex_dividend(self, ticker: str) -> date | None:
         today = date.today()
-        try:
-            payload = self._call(
-                "stock/dividend",
-                symbol=ticker.upper(),
-                **{"from": today.isoformat(), "to": (today + timedelta(days=180)).isoformat()},
-            )
-        except ProviderError:
-            return None
+        payload = self._call(
+            "stock/dividend",
+            symbol=ticker.upper(),
+            **{"from": today.isoformat(), "to": (today + timedelta(days=180)).isoformat()},
+        )
         days = [d for d in (as_date(item.get("date")) for item in payload or []) if d and d >= today]
         return min(days) if days else None
 
     def get_splits(self, ticker: str, since: date) -> Sequence[CorporateEvent]:
-        try:
-            payload = self._call(
-                "stock/split",
-                symbol=ticker.upper(),
-                **{"from": since.isoformat(), "to": date.today().isoformat()},
-            )
-        except ProviderError:
-            return ()
+        payload = self._call(
+            "stock/split",
+            symbol=ticker.upper(),
+            **{"from": since.isoformat(), "to": date.today().isoformat()},
+        )
         events = []
         for item in payload or []:
             day = as_date(item.get("date"))

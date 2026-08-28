@@ -1,6 +1,7 @@
 """Fallback provider: Alpha Vantage REST API (requires ALPHA_VANTAGE_API_KEY)."""
 from __future__ import annotations
 
+import time
 from datetime import date, datetime, timezone
 from typing import Any, Mapping, Sequence
 
@@ -12,6 +13,11 @@ from fa.providers.normalize import as_date, quarter_label, to_float, to_millions
 NAME = "alphavantage"
 BASE_URL = "https://www.alphavantage.co/query"
 
+# Free keys allow one request per second and reject the burst outright, so a
+# multi-call operation like get_fundamentals fails on its second call unless
+# the requests are spaced. A little over a second, to stay clear of rounding.
+MIN_SECONDS_BETWEEN_CALLS = 1.1
+
 
 class AlphaVantageProvider:
     """Second choice when Yahoo is unreachable or rate limited."""
@@ -20,13 +26,23 @@ class AlphaVantageProvider:
 
     def __init__(self, api_key: str | None) -> None:
         self._api_key = api_key
+        self._last_call: float | None = None
 
     def available(self) -> bool:
         return bool(self._api_key)
 
+    def _throttle(self) -> None:
+        """Hold each request a second apart, as the free tier requires."""
+        if self._last_call is not None:
+            waited = time.monotonic() - self._last_call
+            if waited < MIN_SECONDS_BETWEEN_CALLS:
+                time.sleep(MIN_SECONDS_BETWEEN_CALLS - waited)
+        self._last_call = time.monotonic()
+
     def _call(self, function: str, ticker: str, **extra: Any) -> Mapping[str, Any]:
         if not self._api_key:
             raise ProviderError("ALPHA_VANTAGE_API_KEY is not set")
+        self._throttle()
         payload = get_json(
             BASE_URL, {"function": function, "symbol": ticker.upper(), "apikey": self._api_key, **extra}
         )
@@ -94,10 +110,7 @@ class AlphaVantageProvider:
         )
 
     def get_next_earnings(self, ticker: str) -> date | None:
-        try:
-            payload = self._call("EARNINGS", ticker)
-        except ProviderError:
-            return None
+        payload = self._call("EARNINGS", ticker)
         today = date.today()
         upcoming = [
             day
@@ -107,18 +120,12 @@ class AlphaVantageProvider:
         return min(upcoming) if upcoming else None
 
     def get_next_ex_dividend(self, ticker: str) -> date | None:
-        try:
-            overview = self._call("OVERVIEW", ticker)
-        except ProviderError:
-            return None
+        overview = self._call("OVERVIEW", ticker)
         day = as_date(overview.get("ExDividendDate"))
         return day if day and day >= date.today() else None
 
     def get_splits(self, ticker: str, since: date) -> Sequence[CorporateEvent]:
-        try:
-            payload = self._call("SPLITS", ticker)
-        except ProviderError:
-            return ()
+        payload = self._call("SPLITS", ticker)
         events: list[CorporateEvent] = []
         for row in payload.get("data", []) if isinstance(payload, dict) else []:
             day = as_date(row.get("effective_date"))

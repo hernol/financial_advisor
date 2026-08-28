@@ -56,6 +56,10 @@ Thumbs.db
 # is ever added) stays tracked.
 .claude/settings.local.json
 
+# --- Scratchpad ------------------------------------------------------------
+# Herramientas de una sola sesión; algunas leen o escriben secretos.
+scratchpad/
+
 # --- Playwright MCP --------------------------------------------------------
 # Capturas y snapshots que deja el navegador durante la verificación.
 .playwright-mcp/
