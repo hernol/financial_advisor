@@ -317,3 +317,96 @@ def test_a_refresh_that_cannot_reach_a_provider_does_not_kill_the_worker(client,
     """The autouse market refuses every call; the endpoint still answers."""
     bars(conn)
     assert client.post("/api/tickers/PODD/refresh").status_code == 202
+
+
+# --- refreshing the whole watchlist ----------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _clean_refresh_jobs():
+    from fa.api.portfolio import reset_refresh_jobs
+    reset_refresh_jobs()
+    yield
+    reset_refresh_jobs()
+
+
+def test_refreshing_everything_covers_every_followed_ticker(client, conn, monkeypatch):
+    """Open positions and active alerts both count as followed."""
+    bars(conn, "PODD")
+    buy(conn, "PODD")
+
+    alerts_store.add_alert(
+        conn, Alert(ticker="ZZZ", kind=kinds.PCT_UP, params={"pct": 5, "reference": "baseline"})
+    )
+    seen = []
+    monkeypatch.setattr("fa.warm.warm",
+                        lambda db, market, ticker, *, force=False: seen.append((ticker, force)) or True)
+    body = client.post("/api/portfolio/refresh").json()
+    assert body["total"] == 2
+    assert sorted(t for t, _ in seen) == ["PODD", "ZZZ"]
+    assert all(force for _, force in seen), "un refresh tiene que forzar"
+
+
+def test_it_reports_progress_and_finishes(client, conn, monkeypatch):
+    bars(conn, "PODD")
+    buy(conn, "PODD")
+    monkeypatch.setattr("fa.warm.warm", lambda *a, **k: True)
+    client.post("/api/portfolio/refresh")
+    status = client.get("/api/portfolio/refresh/status").json()
+    assert status["status"] == "done"
+    assert status["done"] == status["total"] == 1
+    assert status["failed"] == []
+
+
+def test_a_ticker_with_no_data_is_named_not_just_counted(client, conn, monkeypatch):
+    """Which one failed is the part the reader can act on."""
+    bars(conn, "PODD")
+    buy(conn, "PODD")
+    monkeypatch.setattr("fa.warm.warm", lambda *a, **k: False)
+    client.post("/api/portfolio/refresh")
+    assert client.get("/api/portfolio/refresh/status").json()["failed"] == ["PODD"]
+
+
+def test_one_dead_provider_does_not_abandon_the_rest(client, conn, monkeypatch):
+    bars(conn, "PODD")
+    buy(conn, "PODD")
+    alerts_store.add_alert(
+        conn, Alert(ticker="ZZZ", kind=kinds.PCT_UP, params={"pct": 5, "reference": "baseline"})
+    )
+
+    def flaky(db, market, ticker, *, force=False):
+        if ticker == "PODD":
+            raise RuntimeError("proveedor caído")
+        return True
+
+    monkeypatch.setattr("fa.warm.warm", flaky)
+    client.post("/api/portfolio/refresh")
+    status = client.get("/api/portfolio/refresh/status").json()
+    assert status["status"] == "done"
+    assert status["failed"] == ["PODD"]
+    assert status["done"] == 2, "siguió con el resto de la lista"
+
+
+def test_an_empty_watchlist_is_done_immediately(client, conn):
+    body = client.post("/api/portfolio/refresh").json()
+    assert body == {"tickers": [], "total": 0, "status": "done"}
+
+
+def test_refreshing_everything_does_not_evaluate_alerts(client, conn, monkeypatch):
+    """Same rule as the per-ticker button: asking for prices must not be able
+    to send a notification."""
+    bars(conn, "PODD")
+    position = buy(conn, "PODD")
+    alerts_store.add_alert(
+        conn,
+        Alert(ticker="PODD", kind=kinds.PCT_UP, params={"pct": 1, "reference": "buy"},
+              position_id=position.id),
+    )
+    monkeypatch.setattr("fa.warm.warm", lambda *a, **k: True)
+
+    def explode(*args, **kwargs):
+        raise AssertionError("un refresh no debe correr el motor de alertas")
+
+    monkeypatch.setattr("fa.alerts.engine.run_checks", explode)
+    assert client.post("/api/portfolio/refresh").status_code == 202
+    assert events_store.recent_events(conn, limit=5) == []

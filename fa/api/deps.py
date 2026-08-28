@@ -17,6 +17,7 @@ the module level global.
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 from typing import Any, Iterator
 
 from fa.config import load_settings
@@ -60,6 +61,46 @@ def set_database(database: Database | None) -> None:
     global _database, _owned
     _database = database
     _owned = False
+
+
+def background_database() -> tuple[Database, bool]:
+    """A connection for work that outlives the request that started it.
+
+    Background tasks used to borrow the shared connection. That reads as
+    harmless — the driver serialises statements — but the guarantee is per
+    statement, not per unit of work, and a task that keeps writing for half a
+    minute while the client polls every second collides with it. The bulk
+    refresh made it reproducible: `sqlite3.InterfaceError: bad parameter or
+    other API misuse` on an unrelated read.
+
+    Returns the connection and whether the caller has to close it.
+
+    The check is on ``_owned``, not on ``_database`` being set. At startup this
+    module opens the shared connection, so testing ``_database is not None``
+    would hand it straight back and the whole thing would be a no-op in
+    production while passing every test — the tests are the one case where the
+    connection is injected from outside.
+
+    An injected one is reused on purpose: the caller owns it, and a second
+    connection to an in-memory SQLite would not even see the same data.
+    """
+    if _database is not None and not _owned:
+        return _database, False
+    return connect(load_settings().database_target, threadsafe=True), True
+
+
+def in_background(work: Callable[[Database], None]) -> Callable[[], None]:
+    """Wrap a task so it runs against its own connection and always releases it."""
+
+    def run() -> None:
+        database, mine = background_database()
+        try:
+            work(database)
+        finally:
+            if mine:
+                database.close()
+
+    return run
 
 
 def get_db() -> Iterator[Database]:

@@ -1707,6 +1707,53 @@ async function watchReport(attempts = 90) {
  * asks. The fetch runs on the server in the background; this polls the reading
  * timestamp and stops as soon as it moves, rather than guessing at a delay.
  */
+/** Re-fetch every followed ticker.
+ *
+ * The server reports how far along it is, so the button counts instead of
+ * spinning blind: with a dozen symbols this takes the better part of a minute
+ * and an unlabelled spinner for that long reads as a hang.
+ */
+async function refreshAll() {
+  const button = $('p-refresh');
+  const label = button.querySelector('span');
+  button.disabled = true;
+  button.classList.add('working');
+  try {
+    const started = await send('/api/portfolio/refresh', 'POST');
+    if (!started.total) {
+      showOk('No hay papeles que actualizar.');
+      return;
+    }
+    label.textContent = `0 de ${started.total}…`;
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const job = await api('/api/portfolio/refresh/status');
+      if (job.total) label.textContent = `${job.done || 0} de ${job.total}…`;
+      // Repaint as they land, so the prices visibly move rather than all
+      // appearing at the end.
+      if ((job.done || 0) % 3 === 0) await loadPortfolio().catch(() => {});
+      if (job.status !== 'running') {
+        await loadPortfolio();
+        const failed = job.failed || [];
+        if (failed.length) {
+          // Named, not counted: which ones failed is the part you can act on.
+          showError(`Sin datos para ${failed.join(', ')}. El resto se actualizó.`);
+        } else {
+          showOk(`${job.total} papeles actualizados.`);
+        }
+        return;
+      }
+    }
+    showError('La actualización está tardando demasiado. Seguí en unos minutos.');
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    button.classList.remove('working');
+    label.textContent = 'Actualizar todo';
+    button.disabled = false;
+  }
+}
+
 async function refreshPrices() {
   const button = $('d-refresh');
   const label = button.querySelector('span');
@@ -1849,6 +1896,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('ask-ai').addEventListener('click', openReportForm);
   $('check-now').addEventListener('click', checkNow);
   $('d-refresh').addEventListener('click', refreshPrices);
+  $('p-refresh').addEventListener('click', refreshAll);
   $('add-alert').addEventListener('click', () => {
     openAlertForm(state.ticker).catch((e) => showError(e.message));
   });

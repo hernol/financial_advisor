@@ -10,7 +10,9 @@ while quietly depending on Yahoo answering.
 """
 from __future__ import annotations
 
-from datetime import date
+import logging
+import threading
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -18,11 +20,12 @@ from pydantic import BaseModel, Field
 
 from fa import equity, ledger, models
 from fa.api.auth import account_id
-from fa.api.deps import build_market, get_db
+from fa.api.deps import build_market, get_db, in_background
 from fa.config import BASE_CURRENCY
 from fa.store import history as history_store
 from fa.store.database import Database
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
 
@@ -131,6 +134,106 @@ def portfolio(
         "foreign_currency": foreign,
         "base_currency": BASE_CURRENCY,
     }
+
+
+# A bulk refresh is one job per account, not one per ticker: two of them at
+# once would double every provider call for no extra information. Kept in
+# memory on purpose — it describes work in flight, and work in flight does not
+# survive a restart anyway.
+_refresh_jobs: dict[int, dict[str, Any]] = {}
+_refresh_lock = threading.Lock()
+
+# A worker killed mid-run would otherwise leave the job "running" forever and
+# the button disabled for good.
+REFRESH_STALE_AFTER = timedelta(minutes=15)
+
+
+def refresh_state(account: int) -> dict[str, Any]:
+    with _refresh_lock:
+        job = dict(_refresh_jobs.get(account, {}))
+    if job.get("status") == "running":
+        started = job.get("at")
+        stale = True
+        if started:
+            try:
+                when = datetime.fromisoformat(started)
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=timezone.utc)
+                stale = datetime.now(timezone.utc) - when > REFRESH_STALE_AFTER
+            except ValueError:
+                stale = True
+        if stale:
+            job["status"] = "error"
+            job["detail"] = "La actualización quedó sin terminar."
+    return job
+
+
+def reset_refresh_jobs() -> None:
+    """Forget every bulk refresh. For the tests; safe at any time."""
+    with _refresh_lock:
+        _refresh_jobs.clear()
+
+
+def _set_refresh(account: int, **fields: Any) -> None:
+    with _refresh_lock:
+        job = _refresh_jobs.setdefault(account, {})
+        job.update(fields)
+        job["at"] = datetime.now(timezone.utc).isoformat()
+
+
+@router.post("/refresh", status_code=202)
+def refresh_all(
+    background: BackgroundTasks,
+    db: Database = Depends(get_db),
+    account: int = Depends(account_id),
+) -> dict[str, Any]:
+    """Re-fetch prices for every ticker this account follows.
+
+    The per-ticker button covers one symbol; this is the same thing across the
+    watchlist, which is what somebody coming back after a few days actually
+    wants. Like that one it only refills bars and indicators — no alert is
+    evaluated and nothing is delivered.
+    """
+    from fa.api.deps import build_market
+    from fa.store import positions as positions_store
+    from fa.warm import warm
+
+    tickers = positions_store.tracked_tickers(db, account_id=account)
+    if not tickers:
+        return {"tickers": [], "total": 0, "status": "done"}
+
+    running = refresh_state(account)
+    if running.get("status") == "running":
+        # Not an error: the honest answer is that it is already happening.
+        return {**running, "tickers": tickers, "already": True}
+
+    _set_refresh(account, status="running", done=0, total=len(tickers),
+                 failed=[], current=tickers[0])
+
+    def run(worker_db: Database) -> None:
+        # Its own connection: this loop writes for as long as the provider
+        # takes, and the client polls the status endpoint the whole time.
+        market = build_market(worker_db)
+        failed: list[str] = []
+        for index, ticker in enumerate(tickers):
+            _set_refresh(account, current=ticker, done=index)
+            try:
+                if not warm(worker_db, market, ticker, force=True):
+                    failed.append(ticker)
+            except Exception:
+                # One dead provider must not abandon the rest of the list.
+                logger.exception("bulk refresh of %s failed", ticker)
+                failed.append(ticker)
+            _set_refresh(account, done=index + 1, failed=failed)
+        _set_refresh(account, status="done", current="", failed=failed)
+
+    background.add_task(in_background(run))
+    return {"tickers": tickers, "total": len(tickers), "status": "running"}
+
+
+@router.get("/refresh/status")
+def refresh_status(account: int = Depends(account_id)) -> dict[str, Any]:
+    return refresh_state(account) or {"status": "idle"}
 
 
 @router.get("/history")
@@ -324,7 +427,9 @@ def add_transaction(
         # fetch is queued and the screen fills in when it lands.
         fetching = not has_prices(db, entry.ticker)
         if fetching:
-            background.add_task(warm, db, build_market(db), entry.ticker)
+            background.add_task(in_background(
+                lambda worker, symbol=entry.ticker: warm(worker, build_market(worker), symbol)
+            ))
 
     return {
         "id": entry.id,

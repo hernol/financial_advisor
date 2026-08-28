@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from fa import reporting
 from fa.alerts.suggestions import actionable
 from fa.api.auth import account_id
-from fa.api.deps import build_market, get_db
+from fa.api.deps import build_market, get_db, in_background
 from fa.config import load_settings
 from fa.errors import FinancialAnalyzerError
 from fa.jsonblock import strip_json
@@ -148,7 +148,9 @@ def request_analysis(
         account, symbol, status=RUNNING, detail="", analysis_id=None,
         stage=reporting.FETCHING, started=datetime.now(timezone.utc).isoformat(),
     )
-    background.add_task(_run, db, account, symbol, body.context)
+    background.add_task(in_background(
+        lambda worker: _run(worker, account, symbol, body.context)
+    ))
     return {"ticker": symbol, "status": RUNNING}
 
 

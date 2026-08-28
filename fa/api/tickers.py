@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Path, Query
 
 from fa.api.auth import account_id
-from fa.api.deps import get_db
+from fa.api.deps import get_db, in_background
 from fa.indicators import sma_series
 from fa.metrics import QUALITY_COLUMNS, SUMMARY_COLUMNS
 from fa.models import TICKER_PATTERN
@@ -307,7 +307,7 @@ def lookup_ticker(
     symbol = ticker.upper()
     if has_prices(db, symbol):
         return {"ticker": symbol, "status": "ready", "fetching": False}
-    background.add_task(warm, db, build_market(db), symbol)
+    background.add_task(in_background(lambda worker: warm(worker, build_market(worker), symbol)))
     return {"ticker": symbol, "status": "running", "fetching": True}
 
 
@@ -371,7 +371,9 @@ def refresh_fundamentals(
     from fa.warm import warm_fundamentals
 
     symbol = ticker.upper()
-    background.add_task(warm_fundamentals, db, build_market(db), symbol, force=True)
+    background.add_task(in_background(
+        lambda worker: warm_fundamentals(worker, build_market(worker), symbol, force=True)
+    ))
     return {"ticker": symbol, "status": "running"}
 
 
@@ -395,14 +397,14 @@ def check_now(
     if not alerts_store.list_alerts(db, ticker=symbol, only_active=True, account_id=account):
         raise HTTPException(status_code=422, detail=f"{symbol} no tiene alertas activas.")
 
-    def run() -> None:
+    def run(worker_db: Database) -> None:
         from fa.alerts.engine import run_checks
 
         settings = load_settings()
         try:
             run_checks(
-                db,
-                build_market(db),
+                worker_db,
+                build_market(worker_db),
                 build_dispatcher(settings, echo=False),
                 ticker=symbol,
                 trigger="api",
@@ -410,7 +412,7 @@ def check_now(
         except Exception:  # noqa: BLE001 - a failed check must not kill the worker
             logger.exception("on-demand check of %s failed", symbol)
 
-    background.add_task(run)
+    background.add_task(in_background(run))
     return {"ticker": symbol, "status": "running"}
 
 
@@ -435,14 +437,14 @@ def refresh_prices(
 
     symbol = ticker.upper()
 
-    def run() -> None:
+    def run(worker_db: Database) -> None:
         try:
-            warm(db, build_market(db), symbol, force=True)
+            warm(worker_db, build_market(worker_db), symbol, force=True)
         except Exception:
             # A provider being down must not kill the worker thread.
             logger.exception("on-demand refresh of %s failed", symbol)
 
-    background.add_task(run)
+    background.add_task(in_background(run))
     return {"ticker": symbol, "status": "running"}
 
 
