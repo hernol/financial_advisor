@@ -112,6 +112,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("local-ai", help="diagnostica la conexión con el modelo local")
 
+    move = sub.add_parser(
+        "migrate-db", help="copia toda la base a otro motor (SQLite → Postgres)"
+    )
+    move.add_argument("--to", required=True, metavar="URL",
+                      help="destino, p.ej. postgresql://usuario:clave@host:5432/base")
+    move.add_argument("--force", action="store_true",
+                      help="escribe aunque el destino ya tenga datos")
+
     serve = sub.add_parser("serve", help="levanta la API y el dashboard web")
     serve.add_argument("--host", default="127.0.0.1", help="127.0.0.1 no sale de la máquina")
     serve.add_argument("--port", type=int, default=8000)
@@ -171,6 +179,52 @@ def _in_container() -> bool:
         return "docker" in pathlib.Path("/proc/1/cgroup").read_text()
     except OSError:
         return False
+
+
+def _cmd_migrate_db(args: argparse.Namespace) -> int:
+    """Copy this installation's database into another engine.
+
+    The ids come across unchanged, so every foreign key keeps pointing where it
+    pointed. Nothing is deleted from the source: it stays exactly as it was,
+    which is what makes this safe to try.
+    """
+    from fa.config import load_settings
+    from fa.store.db import connect
+    from fa.store.transfer import copy_all, verify
+
+    settings = load_settings()
+    source = connect(settings.database_target)
+    print(f"📤 Origen : {settings.database_target}")
+    print(f"📥 Destino: {args.to}")
+    try:
+        target = connect(args.to)
+    except Exception as exc:  # noqa: BLE001 - a bad URL is a message, not a traceback
+        print(f"\n🚫 No se pudo abrir el destino: {exc}")
+        return 2
+
+    def progress(table: str, copied: int, total: int) -> None:
+        if total:
+            print(f"   {table:24} {copied:>6} filas")
+
+    print("\nCopiando (el origen no se toca):")
+    try:
+        copy_all(source, target, force=args.force, on_table=progress)
+    except ValueError as exc:
+        print(f"\n🚫 {exc}")
+        return 2
+
+    problems = verify(source, target)
+    if problems:
+        print("\n🚫 La verificación encontró diferencias:")
+        for line in problems:
+            print(f"   {line}")
+        print("\n   El destino quedó incompleto. No lo uses hasta resolverlo.")
+        return 1
+
+    print("\n✅ Todas las tablas coinciden en cantidad de filas.")
+    print("   Para usarla, poné en el .env:")
+    print(f"     DATABASE_URL={args.to}")
+    return 0
 
 
 def _cmd_serve(args: argparse.Namespace) -> int:
@@ -418,6 +472,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "kinds":  # does not need providers or the database
         return _cmd_kinds(args)
+    if args.command == "migrate-db":
+        return _cmd_migrate_db(args)
     if args.command == "serve":
         # The server opens its own database when it starts, and it must not
         # inherit a connection that this process would close on the way out.

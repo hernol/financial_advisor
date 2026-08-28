@@ -1,0 +1,48 @@
+# Overlay para correr todo en un servidor: Postgres propio, en Docker, con sus
+# datos en un volumen.
+#
+#   docker compose -f compose.yaml -f compose.lan.yaml -f compose.server.yaml up -d
+#
+# O, una vez, en el .env del servidor:
+#   COMPOSE_FILE=compose.yaml:compose.lan.yaml:compose.server.yaml
+#   DATABASE_URL=postgresql://fa:LACLAVE@db:5432/fa
+#   POSTGRES_PASSWORD=LACLAVE
+#
+# El Postgres del compose base tiene profile "dev" y no tiene volumen: es
+# descartable, para correr la suite. Este es otro servicio, con nombre distinto
+# y estado real, justamente para que no se confundan.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: financial_analyzer_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fa}
+      # Sin default a propósito: una base con contraseña adivinable no debería
+      # poder levantarse por olvido.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en el .env}
+      POSTGRES_DB: ${POSTGRES_DB:-fa}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    # Sin `ports`: sólo la red interna de compose llega. La base no tiene por
+    # qué ser alcanzable desde afuera del servidor, y publicar 5432 es una de
+    # las formas más rápidas de que te la encuentren.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fa} -d ${POSTGRES_DB:-fa}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  dashboard:
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # El chequeo periódico también necesita la base arriba.
+  alerts:
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db_data:

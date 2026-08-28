@@ -31,25 +31,15 @@ usuarios; las posiciones, alertas y movimientos son por cuenta.
 
 ## 2. Bloqueos concretos, verificados
 
-### 2.1 `psycopg` no está en la imagen — bloqueante
+### 2.1 `psycopg` no está en la imagen — ✅ RESUELTO
 
-```
-docker compose exec dashboard python -c "import psycopg"
-→ ModuleNotFoundError
-```
+Estaba comentado en `requirements.txt`, así que el contenedor no podía hablar
+con Postgres. Se confirmó en el ensayo: `migrate-db` murió con *"DATABASE_URL
+apunta a Postgres pero psycopg no está instalado"*.
 
-Está comentado en `requirements.txt`:
-
-```
-# Optional: only needed when DATABASE_URL points at Postgres or Supabase.
-# psycopg[binary]>=3.2
-```
-
-En modo local con SQLite no hace falta, y por eso quedó así. En el servidor, con
-`DATABASE_URL` apuntando a Postgres, el contenedor arranca y muere.
-
-**Acción**: descomentarlo, o mejor, dos targets en el Dockerfile (`local` y
-`server`) para no cargar el driver donde no se usa.
+Ya está descomentado, junto con `pyjwt` (que el modo Supabase necesita y estaba
+listado sólo como dependencia de desarrollo). La imagen reconstruida trae
+psycopg 3.3.4.
 
 ### 2.2 La imagen es Python 3.11, el desarrollo es 3.14
 
@@ -152,30 +142,61 @@ Goods API y Web Push anda en Android, así que no hace falta nada nativo.
 
 Cada fase termina con algo verificable. No empezar la siguiente sin eso.
 
-### Fase 0 — Preparar la imagen
+### Fase 0 — Preparar la imagen — ✅ HECHA (parcial)
 
-- Descomentar `psycopg[binary]>=3.2` en `requirements.txt`.
-- Alinear la versión de Python entre `Dockerfile` y el entorno de desarrollo.
-- Correr la suite **dentro de la imagen**, no sólo en el venv.
-
-*Listo cuando*: `docker compose run --rm analyzer python -m pytest` pasa, y
-`python -c "import psycopg"` funciona dentro del contenedor.
+- ✅ `psycopg[binary]` y `pyjwt` en `requirements.txt`. Verificado dentro del
+  contenedor: psycopg 3.3.4.
+- ⬜ Falta alinear la versión de Python entre `Dockerfile` (3.11) y el entorno
+  de desarrollo (3.14), y correr la suite **dentro de la imagen**. No bloquea
+  el deploy, pero significa que los tests que corrés no prueban la versión que
+  corre en producción.
 
 ### Fase 1 — Servidor y base
 
-- VPS con Docker. Postgres **gestionado** (Supabase, Neon, RDS): la base es el
-  único estado que importa y no conviene operarla a mano.
-- `DATABASE_URL` apuntando ahí. Con Supabase, usar el pooler en modo
-  transacción (puerto 6543).
-- Las migraciones corren solas al arrancar. Verificar que llegue a v13.
-- Migrar los datos actuales desde `data/financial_analyzer.db`.
+El dueño eligió **Postgres propio en Docker**, no gestionado. `compose.server.yaml`
+lo agrega como servicio `db` con volumen `db_data`, sin publicar el puerto: sólo
+la red interna de compose llega a la base.
 
-*Ojo con el sequence de Postgres*: al insertar la cuenta local con `id=1`
-explícito, `nextval` queda atrás y el primer alta de usuario colisiona en la PK.
-Ya hay una función `sync_identity()` que hace el `setval`; confirmar que corre.
+Pasos en el servidor:
 
-*Listo cuando*: la suite pasa contra ese Postgres
-(`FA_TEST_DATABASE_URL=…`) y `/api/portfolio` devuelve los datos migrados.
+```bash
+git clone … && cd financial_analyzer
+cp .env.example .env      # y completar (ver abajo)
+docker compose build
+
+# 1. la base primero
+docker compose up -d db
+
+# 2. traer el SQLite de la laptop a ./data/ y migrarlo
+docker compose run --rm \
+  -e DATABASE_URL= -e FA_DB_PATH=/app/data/financial_analyzer.db \
+  analyzer migrate-db --to postgresql://fa:LACLAVE@db:5432/fa
+
+# 3. el resto
+docker compose up -d dashboard
+```
+
+En el `.env` del servidor:
+
+```
+COMPOSE_FILE=compose.yaml:compose.lan.yaml:compose.server.yaml
+DATABASE_URL=postgresql://fa:LACLAVE@db:5432/fa
+POSTGRES_PASSWORD=LACLAVE
+FA_API_TOKEN=…
+```
+
+`migrate-db` copia las 17 tablas conservando los ids, corre las migraciones en
+el destino, arregla las secuencias de identidad y **verifica que las cantidades
+de filas coincidan** antes de decir que terminó. No toca el origen. Se niega a
+escribir sobre una base que ya tiene datos salvo con `--force`.
+
+*Ensayado completo el 2026-08-28* contra la base real (27.000 filas): migración,
+verificación, app levantada sobre el Postgres del contenedor devolviendo las
+mismas cifras que SQLite, y un alta+baja de movimiento para confirmar que las
+secuencias no colisionan.
+
+*Listo cuando*: `migrate-db` dice que todas las tablas coinciden y
+`/api/portfolio` sobre el servidor devuelve las mismas cifras que tu laptop.
 
 ### Fase 2 — HTTPS
 
