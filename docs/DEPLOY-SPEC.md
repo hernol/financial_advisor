@@ -1,7 +1,7 @@
 # Spec: mover el backend a un servidor y llegar al APK
 
-Documento de trabajo para continuar en otra sesión. Escrito el 2026-08-26 contra
-el commit `728418b` de `main`.
+Documento de trabajo para continuar en otra sesión. Escrito el 2026-08-26,
+actualizado el 2026-08-28 contra el commit `598c277` de `main`.
 
 **Objetivo final**: backend hosteado, clientes móviles, suscripciones.
 **Objetivo inmediato**: correr esto en un servidor propio, con un solo usuario
@@ -17,7 +17,7 @@ Lo que sigue ya funciona y tiene tests. No hace falta rediseñarlo.
 |---|---|
 | Esquema | v13, migraciones versionadas con backup `VACUUM INTO` y `PRAGMA foreign_key_check` |
 | Motores | SQLite **y** Postgres, sin ORM. `fa/store/database.py` traduce paramstyle (`?`→`%s`), `RETURNING id` y DDL por dialecto |
-| Suite | 757 en SQLite, 762 en Postgres (`FA_TEST_DATABASE_URL=postgresql://…`) |
+| Suite | 802 en SQLite, 807 en Postgres (`FA_TEST_DATABASE_URL=postgresql://…`) |
 | Multi-tenant | `TENANT_TABLES` por `account_id`, `SHARED_TABLES` por ticker. Aislamiento con tests que lo garantizan |
 | Auth | `fa/api/auth.py::mode_for()` → `supabase` \| `token` \| `open`, según qué variables estén puestas |
 | Cliente | PWA sin build: manifest, service worker, uPlot vendorizado. 200 KB en total |
@@ -79,7 +79,34 @@ desde el principio ahora que hay más de una cuenta:
 Esa separación ya existe conceptualmente en el código (`fa/warm.py` documenta
 "reads never fetch, and the one write that introduces a new ticker does").
 
-### 2.4 Yahoo prohíbe el uso comercial — bloqueante para monetizar
+### 2.4 Cada tarea de fondo abre su propia conexión
+
+Desde `598c277`, las tareas de fondo ya no le prestan la conexión al request:
+`deps.in_background()` les abre una y la cierra al terminar. Fue por un bug real
+—un `/portfolio/history` devolvió 500 con `sqlite3.InterfaceError` mientras
+corría un refresh masivo— y en un servidor con varias cuentas importa más, no
+menos.
+
+**Consecuencia para Postgres**: cada refresh, cada informe de IA y cada
+`check-alerts` on-demand abre una conexión mientras dura. Con el pooler de
+Supabase en modo transacción (puerto 6543) el límite de conexiones es real y
+bajo. Si el fan-out de la fase 4 lanza N trabajos en paralelo, hay que
+dimensionarlo contra ese límite o poner un pool del lado de la app.
+
+Hay un detalle que casi se cuela y conviene recordar: la primera versión del
+helper decidía por `_database is not None`. El arranque setea eso, así que
+devolvía la conexión compartida y el arreglo **no hacía nada en producción
+mientras pasaba todos los tests** — los tests son justamente el caso donde la
+base viene inyectada. Decide por `_owned`.
+
+### 2.5 CORS está clavado a un puerto de desarrollo
+
+`fa/api/app.py` permite sólo `http://localhost:5173` y `http://127.0.0.1:5173`,
+sin variable de entorno que lo cambie. Hoy no molesta porque el cliente se sirve
+del mismo origen que la API. Molesta en el momento en que se separen — ver la
+sección 6.
+
+### 2.6 Yahoo prohíbe el uso comercial — bloqueante para monetizar
 
 `yfinance` es la fuente primaria. Sus términos no permiten uso comercial. En el
 momento en que se cobra una suscripción, el proyecto queda afuera.
@@ -89,7 +116,7 @@ y ambos tienen planes comerciales. Es cambiar contrato y key, no reescribir.
 
 **Hacerlo antes del primer cobro, no después.**
 
-### 2.5 Cobrar por recomendaciones puede ser asesoramiento regulado
+### 2.7 Cobrar por recomendaciones puede ser asesoramiento regulado
 
 El informe de IA sugiere comprar y vender. Cobrar por eso puede caer bajo
 regulación de asesoramiento financiero, según la jurisdicción de los usuarios.
@@ -200,6 +227,9 @@ dominio real.
 
 Ver 2.3. Separar refresco por ticker de evaluación por cuenta.
 
+Al dimensionar el paralelismo, mirar 2.4: cada trabajo abre su propia conexión,
+y el pooler de Supabase en modo transacción tiene un techo bajo.
+
 *Listo cuando*: agregar una segunda cuenta que siga los mismos tickers no
 duplica los fetch.
 
@@ -208,7 +238,7 @@ duplica los fetch.
 - Alta de usuarios por Supabase (el modo ya existe, `mode_for()` lo detecta).
 - Web Push con tabla `devices` (hoy las notificaciones son Telegram).
 - Planes y facturación.
-- **No arrancar sin resolver 2.4 y 2.5.**
+- **No arrancar sin resolver 2.6 y 2.7.**
 
 ---
 
@@ -223,7 +253,58 @@ duplica los fetch.
 
 ---
 
-## 6. Referencia rápida
+## 6. El plan inmediato: cliente local contra backend remoto
+
+La idea del dueño es probar la app actual apuntando al backend del servidor, y
+recién después hacer la app móvil. Hay dos maneras de leer eso y conviene no
+confundirlas, porque una es trivial y la otra tiene trabajo.
+
+### Opción A — todo en el servidor (recomendada para empezar)
+
+El contenedor `dashboard` sirve la API **y** el cliente web en el mismo puerto.
+Levantándolo en el servidor, abrir la URL en el navegador ya es "la app contra
+el backend del servidor". Mismo origen, sin CORS, sin cambios de código.
+
+Es además el camino directo a la fase 3: es esa misma URL, ya con HTTPS, la que
+el TWA va a envolver.
+
+### Opción B — cliente local, API remota
+
+Sirve para probar el backend nuevo sin desplegar el cliente, pero **no funciona
+tal cual** y hay que saberlo antes de empezar:
+
+1. Los ~37 llamados del cliente usan rutas relativas (`/api/...`). Servido desde
+   otro origen, pegan contra el origen local, no contra el servidor. Hace falta
+   una base configurable — casi todos pasan por el helper `api()` en
+   `web/app.js`, más dos `fetch` sueltos.
+2. CORS sólo permite `localhost:5173` (ver 2.5). Hay que hacer la lista
+   configurable por variable de entorno y sumar el origen desde el que se sirva
+   el cliente.
+3. Con `FA_API_TOKEN` puesto, el navegador manda `Authorization`, lo que
+   convierte todo en pedido no-simple: el preflight tiene que pasar y
+   `allow_headers` ya está en `*`, así que alcanza con arreglar los orígenes.
+
+Es el mismo trabajo que pediría Capacitor. Si el destino es el TWA (opción A +
+HTTPS), este trabajo no hace falta nunca.
+
+### Variante útil sin tocar nada
+
+Para probar sólo la capa de datos contra el Postgres del servidor, sin desplegar
+nada: levantar el dashboard local con `DATABASE_URL` apuntando a la base
+remota. El cliente sigue siendo local y del mismo origen que su API local, así
+que no hay CORS de por medio, y lo que se está ejercitando es exactamente lo que
+importa validar primero — migraciones, driver y datos migrados.
+
+```bash
+DATABASE_URL=postgresql://usuario:clave@host:6543/postgres \
+  docker compose up -d dashboard
+```
+
+Ojo: eso requiere la fase 0 hecha, porque hoy `psycopg` no está en la imagen.
+
+---
+
+## 7. Referencia rápida
 
 **Variables** (todas en `.env.example`, y `compose.yaml` las inyecta en cada
 servicio con un solo anchor `x-app-env`):
