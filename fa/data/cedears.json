@@ -1,0 +1,4 @@
+[
+ {"local": "AAPL", "yahoo": "AAPL.BA", "underlying": "AAPL", "cedears": 20, "shares": 1, "name": "APPLE INC", "supported": true, "reason": ""},
+ {"local": "SID", "yahoo": "SID.BA", "underlying": "SID", "cedears": 1, "shares": 8, "name": "CIA SIDERURGICA NACIONAL-ADR", "supported": true, "reason": ""}
+]
