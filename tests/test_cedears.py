@@ -109,3 +109,13 @@ def test_a_frankfurt_listing_is_refused_with_a_reason():
     symbol, reason = translate("BAS GR")
     assert symbol is None
     assert "EUR" in reason
+
+
+def test_a_class_suffix_written_with_a_dot_becomes_a_dash():
+    """Comafi writes AKO.B; Yahoo wants AKO-B, and quotes it at 29 USD.
+
+    The dot rule is deliberately narrow - one trailing letter - so it cannot
+    swallow an exchange suffix like the .IL this same function produces.
+    """
+    assert translate("AKO.B") == ("AKO-B", "")
+    assert translate("SMSN LI") == ("SMSN.IL", "")

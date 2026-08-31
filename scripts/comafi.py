@@ -47,6 +47,11 @@ def translate(symbol: str) -> tuple[str | None, str]:
     if "/" in raw:
         # Share classes: Comafi writes BRK/B, Yahoo writes BRK-B.
         return raw.replace("/", "-"), ""
+    # The same class, written the other way: AKO.B is Yahoo's AKO-B, quoted at
+    # 29 USD. Deliberately narrow - one trailing letter - so it cannot swallow
+    # an exchange suffix like the .IL this function produces just below.
+    if re.fullmatch(r"[A-Za-z]+\.[A-Za-z]", raw):
+        return raw.replace(".", "-"), ""
     if " " in raw:
         base, _, code = raw.rpartition(" ")
         if code in _REFUSED_SUFFIX:
