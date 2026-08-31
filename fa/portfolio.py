@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass
 from typing import Sequence
 
+from fa import cedears
+from fa.cedears import Cedear
 from fa.config import BASE_CURRENCY
 from fa.errors import DataUnavailableError
 from fa.market import MarketService
@@ -24,10 +26,23 @@ class Holding:
     price: float | None
     currency: str
     error: str | None = None
+    # A CEDEAR is a fraction of a share, so the quantity held is not a number of
+    # shares. One for an ordinary holding, which leaves every existing
+    # calculation exactly as it was.
+    shares_per_unit: float = 1.0
+    cedear: Cedear | None = None
 
     @property
     def market_value(self) -> float | None:
-        return None if self.price is None else self.price * self.position.quantity
+        """What the holding is worth, in the currency of ``price``.
+
+        For a CEDEAR the price is the underlying's, in dollars, and the ratio
+        converts the receipts into the shares they represent. No exchange rate
+        takes part: both factors are a real quote and a published constant.
+        """
+        if self.price is None:
+            return None
+        return self.price * self.position.quantity * self.shares_per_unit
 
     @property
     def is_base_currency(self) -> bool:
@@ -73,6 +88,20 @@ def build_portfolio(
     """Value every open position; a failing ticker is reported, never faked."""
     holdings: list[Holding] = []
     for position in positions_store.list_positions(conn):
+        cedear = cedears.resolve(position.ticker)
+        if cedear is not None and not cedear.supported:
+            # Refused rather than valued through a euro price, and reported the
+            # same way a genuinely foreign listing already is.
+            holdings.append(
+                Holding(
+                    position=position,
+                    price=None,
+                    currency=position.currency,
+                    cedear=cedear,
+                    error=f"{position.ticker}: {cedear.reason}. Queda fuera del total.",
+                )
+            )
+            continue
         try:
             quote = market.quote(position.ticker)
         except DataUnavailableError as exc:
@@ -93,7 +122,15 @@ def build_portfolio(
                 )
             )
             continue
-        holdings.append(Holding(position=position, price=quote.price, currency=quote.currency))
+        holdings.append(
+            Holding(
+                position=position,
+                price=quote.price,
+                currency=quote.currency,
+                shares_per_unit=cedear.shares_per_cedear if cedear else 1.0,
+                cedear=cedear,
+            )
+        )
     portfolio = Portfolio(holdings=tuple(holdings))
     if record:
         save_valuation(conn, portfolio)
