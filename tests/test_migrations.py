@@ -159,3 +159,23 @@ def test_the_backfill_does_not_duplicate_on_a_second_run(tmp_path):
     connect(path).close()
     conn = connect(path)
     assert len(transactions_store.list_transactions(conn, ticker="PODD")) == 1
+
+
+def test_migration_14_adds_the_frozen_conversion_columns(tmp_path):
+    """A peso trade needs the rate of its own day kept, not recomputed later.
+
+    Recomputing would make an old purchase's P&L move every time the dollar
+    jumps, which says something false about a trade that already happened.
+    """
+    conn = connect(tmp_path / "fresh.db")
+    assert "cost_basis_usd" in conn.columns("positions")
+    assert {"fx_rate", "usd_price"} <= set(conn.columns("transactions"))
+
+
+def test_a_legacy_database_gains_the_conversion_columns_too(tmp_path):
+    """The columns arrive by migration, not only in a schema built from scratch."""
+    path = tmp_path / "legacy.db"
+    legacy_database(path)
+    conn = connect(path)
+    assert "cost_basis_usd" in conn.columns("positions")
+    assert conn.execute("SELECT COUNT(*) FROM positions").fetchone()[0] == 1

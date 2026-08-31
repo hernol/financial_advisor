@@ -578,6 +578,20 @@ def _migrate_cash_movements(db: Database) -> None:
         db.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {definition}")
 
 
+def _migrate_frozen_conversion(db: Database) -> None:
+    """Keep what a trade paid in another currency was worth on the day it happened.
+
+    A CEDEAR is bought in pesos. Its dollar cost is derived once, from that
+    date's own closes, and then frozen: deriving it again later against today's
+    rate would quietly rewrite the past, and an old purchase's P&L would move
+    every time the dollar jumped. Nullable everywhere, because every existing
+    row predates this and is already in the base currency.
+    """
+    add_column(db, "positions", "cost_basis_usd", "{REAL}")
+    add_column(db, "transactions", "fx_rate", "{REAL}")
+    add_column(db, "transactions", "usd_price", "{REAL}")
+
+
 MIGRATIONS: tuple[Migration, ...] = (
     Migration(3, "transaction ledger", _migrate_ledger, sqlite_only=True),
     Migration(4, "drop destructive cascades", _migrate_no_cascade, sqlite_only=True),
@@ -590,6 +604,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(11, "corrections point at what they replace", _migrate_corrections),
     Migration(12, "store the fundamental tables", _script(_FUNDAMENTALS)),
     Migration(13, "cash movements have no ticker", _migrate_cash_movements),
+    Migration(14, "freeze the conversion of a foreign-currency trade", _migrate_frozen_conversion),
 )
 
 TARGET_VERSION = max(m.version for m in MIGRATIONS)

@@ -86,7 +86,10 @@ CREATE TABLE IF NOT EXISTS positions (
     deleted_at   TEXT,
     close_price  {REAL},
     close_date   TEXT,
-    realized_pnl {REAL}
+    realized_pnl {REAL},
+    -- What the position cost in the base currency, frozen at trade time. Only
+    -- a trade paid in another currency needs it; NULL everywhere else.
+    cost_basis_usd {REAL}
 );
 CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(account_id, ticker);
 
@@ -111,7 +114,11 @@ CREATE TABLE IF NOT EXISTS transactions (
     replaces_id {FK_ID},
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    deleted_at  TEXT
+    deleted_at  TEXT,
+    -- The rate that converted this trade, and the per-unit price it produced,
+    -- both derived once from the trade date's own closes and then left alone.
+    fx_rate     {REAL},
+    usd_price   {REAL}
 );
 CREATE INDEX IF NOT EXISTS idx_tx_replaces ON transactions(replaces_id);
 CREATE INDEX IF NOT EXISTS idx_tx_ticker ON transactions(account_id, ticker, trade_date);

@@ -85,6 +85,17 @@ def sync_from_ledger(
     closed = (not holding.is_open) or manually_closed
     last_sell = sells[-1] if sells else None
 
+    # Cost in the base currency for a holding bought in another one. Summed from
+    # the frozen per-unit prices rather than converted here: each buy carries the
+    # rate of its own day, and today's rate has no business rewriting them. None
+    # when no entry was ever converted, which is every ordinary holding.
+    converted = [e for e in buys if e.usd_price is not None]
+    cost_basis_usd = (
+        sum(e.usd_price * (e.quantity or 0.0) + (e.fees or 0.0) / (e.fx_rate or 1.0)
+            for e in converted)
+        if converted else None
+    )
+
     values = (
         holding.quantity,
         holding.average_cost,
@@ -95,21 +106,23 @@ def sync_from_ledger(
         to_iso(last_sell.trade_date) if last_sell else (row["close_date"] if row else None),
         holding.realized_pnl or None,
         now,
+        cost_basis_usd,
     )
 
     if row is None:
         conn.insert(
             "INSERT INTO positions(account_id, ticker, quantity, buy_price, buy_date, currency, "
-            "notes, created_at, closed_at, close_price, close_date, realized_pnl, updated_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "notes, created_at, closed_at, close_price, close_date, realized_pnl, updated_at, "
+            "cost_basis_usd) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (account_id, symbol, values[0], values[1], values[2], values[3],
              buys[0].note if buys else "", now, *values[4:]),
         )
     else:
         conn.execute(
             "UPDATE positions SET quantity = ?, buy_price = ?, buy_date = ?, currency = ?, "
-            "closed_at = ?, close_price = ?, close_date = ?, realized_pnl = ?, updated_at = ? "
-            "WHERE id = ?",
+            "closed_at = ?, close_price = ?, close_date = ?, realized_pnl = ?, updated_at = ?, "
+            "cost_basis_usd = ? WHERE id = ?",
             (*values, row["id"]),
         )
     conn.commit()

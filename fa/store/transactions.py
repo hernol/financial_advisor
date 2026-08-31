@@ -24,7 +24,8 @@ def record(
     new_id = conn.insert(
         "INSERT INTO transactions(account_id, position_id, ticker, kind, trade_date, quantity, "
         "price, amount, ratio, fees, currency, note, source, replaces_id, created_at, "
-        "updated_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "updated_at, fx_rate, usd_price) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             account_id,
             transaction.position_id,
@@ -44,6 +45,10 @@ def record(
             transaction.replaces_id,
             to_iso(now),
             to_iso(now),
+            # Frozen at recording time. Deriving them again later would rewrite
+            # what a past trade was worth every time the rate moved.
+            transaction.fx_rate,
+            transaction.usd_price,
         ),
     )
     conn.commit()

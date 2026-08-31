@@ -64,6 +64,7 @@ def row_to_position(row: Row) -> Position:
         close_price=_optional(row, "close_price"),
         close_date=parse_date(_optional(row, "close_date")),
         realized_pnl=_optional(row, "realized_pnl"),
+        cost_basis_usd=_optional(row, "cost_basis_usd"),
     )
 
 
@@ -120,4 +121,6 @@ def row_to_transaction(row: Row) -> Transaction:
         replaces_id=_optional(row, "replaces_id"),
         created_at=parse_datetime(row["created_at"]),
         updated_at=parse_datetime(row["updated_at"]),
+        fx_rate=_optional(row, "fx_rate"),
+        usd_price=_optional(row, "usd_price"),
     )

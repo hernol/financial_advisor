@@ -115,6 +115,10 @@ class Position:
     close_price: float | None = None
     close_date: date | None = None
     realized_pnl: float | None = None
+    # Cost in the base currency for a position bought in another one, derived
+    # once from the trade date's own prices and then frozen. None means the
+    # position is already in the base currency and cost_basis says it all.
+    cost_basis_usd: float | None = None
 
     @property
     def is_closed(self) -> bool:
@@ -158,6 +162,10 @@ class Transaction:
     id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # The rate this trade was converted at and the per-unit price it produced.
+    # Both derived from the trade date's own closes, never from today's rate.
+    fx_rate: float | None = None
+    usd_price: float | None = None
 
     @property
     def signed_quantity(self) -> float:
