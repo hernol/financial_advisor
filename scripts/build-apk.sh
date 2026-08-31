@@ -366,6 +366,9 @@ for candidate in app-release-signed.apk app-release-unsigned-aligned.apk; do
 done
 if [ -n "$APK" ]; then
     ok "APK: $APK"
+    case "$APK" in
+        *unsigned*) warn "está SIN FIRMAR: ningún teléfono lo va a instalar." ;;
+    esac
 else
     warn "no encontré el APK en $PROJECT_DIR; mirá la salida de arriba"
 fi
@@ -374,25 +377,60 @@ fi
 
 step "8/8 · Fingerprint"
 
-# Bubblewrap writes its own assetlinks.json next to the build. Reading it
-# avoids a second keytool run, which would prompt for the password again.
+# Read the certificate out of the APK that was just signed, not out of the
+# keystore. They should agree, and when they do not it is the APK that is
+# telling the truth about what a phone will check. It also costs no password:
+# a signature is public, and prompting again for a secret we do not need would
+# be the wrong habit to teach.
+#
+# An earlier version looked for an assetlinks.json next to the build. Bubblewrap
+# does not write one — that is `bubblewrap fingerprint generateAssetLinks`, a
+# separate command — so the file was never there and this step always fell
+# through to telling the owner to run keytool by hand.
+fingerprint_of() {
+    local apk="$1" digest
+    [ -f "$apk" ] || return 1
+    [ -n "${APKSIGNER:-}" ] || return 1
+    digest=$("$APKSIGNER" verify --print-certs "$apk" 2>/dev/null \
+        | sed -n 's/.*certificate SHA-256 digest: *//p' | head -1)
+    [ -n "$digest" ] || return 1
+    # apksigner prints it bare and lowercase; assetlinks.json wants the
+    # colon-separated uppercase form.
+    printf '%s' "$digest" | tr 'a-f' 'A-F' | sed 's/../&:/g; s/:$//'
+}
+
+# Do not tie this to the build-tools version resolved above: that lookup can
+# come up empty for its own reasons, and then this would fail for a reason that
+# has nothing to do with it. Any apksigner in the SDK reads any signed APK.
+APKSIGNER=""
+for candidate in "${SDK_PATH:-}/build-tools/${bt_version:-none}/apksigner" \
+                 "${SDK_PATH:-}"/build-tools/*/apksigner; do
+    [ -x "$candidate" ] && APKSIGNER="$candidate"
+done
+if [ -z "$APKSIGNER" ] && have apksigner; then
+    APKSIGNER="$(command -v apksigner)"
+fi
+
 FINGERPRINT=""
-if [ -f assetlinks.json ]; then
-    FINGERPRINT=$(node -e '
-        const links = JSON.parse(require("fs").readFileSync("assetlinks.json", "utf8"));
-        const target = (links[0] || {}).target || {};
-        process.stdout.write((target.sha256_cert_fingerprints || [])[0] || "");
-    ' 2>/dev/null || true)
+if [ -n "$APK" ]; then
+    FINGERPRINT=$(fingerprint_of "$APK" || true)
 fi
 if [ -z "$FINGERPRINT" ]; then
-    FINGERPRINT=$(grep -oE '([0-9A-F]{2}:){31}[0-9A-F]{2}' "$BUILD_LOG" | head -1 || true)
+    FINGERPRINT=$(grep -oiE '([0-9A-F]{2}:){31}[0-9A-F]{2}' "$BUILD_LOG" | head -1 \
+        | tr 'a-f' 'A-F' || true)
 fi
 
 if [ -z "$FINGERPRINT" ]; then
     warn "no pude extraerlo automáticamente. Sacalo con:"
     info ""
+    if [ -n "$APKSIGNER" ] && [ -n "$APK" ]; then
+        info "  $APKSIGNER verify --print-certs $APK"
+    fi
     info "  keytool -list -v -keystore $KEYSTORE -alias $KEY_ALIAS | grep SHA256:"
     info ""
+    note "el primero no pide contraseña y dice qué firmó de verdad el APK;"
+    note "el segundo dice qué hay en el keystore, que es lo mismo salvo que"
+    note "algo haya salido mal."
     exit 0
 fi
 
