@@ -11,8 +11,9 @@ Lo sirve nginx y no la app, por tres razones: es una afirmación sobre el
 dominio y no contenido de la aplicación, tiene que responder aunque el
 dashboard esté caído, y cambiarlo no necesita reconstruir la imagen.
 
-**El fingerprint de acá es un placeholder.** Sale del keystore con el que se
-firma el APK:
+**El fingerprint de acá es un placeholder.** `scripts/build-apk.sh` construye
+el APK y lo imprime al final, además de avisar si este archivo todavía no
+coincide. A mano, sale del keystore con el que se firma:
 
 ```bash
 keytool -list -v -keystore android.keystore -alias android | grep 'SHA256:'
