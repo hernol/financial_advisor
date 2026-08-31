@@ -52,3 +52,60 @@ def test_the_table_carries_why_a_cedear_is_unsupported(tmp_path):
     loaded = load_table(table)
     assert loaded["BAS.BA"].supported is False
     assert "EUR" in loaded["BAS.BA"].reason
+
+
+# --- the Comafi parser ------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+
+from scripts.comafi import parse, split_ratio, translate  # noqa: E402
+
+FIXTURE = Path(__file__).parent / "fixtures" / "comafi-sample.html"
+
+
+def _rows():
+    return {r["local"]: r for r in parse(FIXTURE.read_text(encoding="utf-8"))}
+
+
+def test_the_parser_reads_every_program_row():
+    rows = _rows()
+    assert len(rows) == 8
+    assert rows["AAPL"]["name"] == "APPLE INC"
+
+
+def test_a_ratio_splits_into_two_integers():
+    assert split_ratio("20:1") == (20, 1)
+    assert split_ratio("1:8") == (1, 8)
+    assert split_ratio(" 60 : 1 ") == (60, 1)
+
+
+def test_a_ratio_that_is_not_two_integers_is_refused():
+    """Rounding a shape we have never seen would be inventing the ratio."""
+    with pytest.raises(ValueError):
+        split_ratio("1.5:1")
+    with pytest.raises(ValueError):
+        split_ratio("varios")
+
+
+def test_a_plain_symbol_translates_to_itself():
+    assert translate("NOK") == ("NOK", "")
+
+
+def test_a_share_class_slash_becomes_a_dash():
+    assert translate("BRK/B") == ("BRK-B", "")
+
+
+def test_a_us_suffix_is_dropped():
+    assert translate("VIST US") == ("VIST", "")
+
+
+def test_a_london_suffix_becomes_the_yahoo_one():
+    assert translate("SMSN LI") == ("SMSN.IL", "")
+
+
+def test_a_frankfurt_listing_is_refused_with_a_reason():
+    """It quotes in euros, so valuing through it would need a second FX hop -
+    the very thing this design exists to avoid."""
+    symbol, reason = translate("BAS GR")
+    assert symbol is None
+    assert "EUR" in reason
