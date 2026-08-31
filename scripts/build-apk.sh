@@ -67,7 +67,7 @@ note "FA_TWA_PACKAGE, FA_TWA_DIR, FA_TWA_KEYSTORE, FA_TWA_ALIAS."
 
 # --- 1. prerequisites --------------------------------------------------------
 
-step "1/7 · Requisitos"
+step "1/8 · Requisitos"
 
 have curl || die "falta curl"
 have node || die "falta node. Instalalo (nvm, o 'sudo pacman -S nodejs npm') y volvé a correr"
@@ -87,7 +87,7 @@ ok "keytool presente"
 
 # --- 2. bubblewrap -----------------------------------------------------------
 
-step "2/7 · Bubblewrap"
+step "2/8 · Bubblewrap"
 
 if have bubblewrap; then
     ok "ya instalado"
@@ -100,7 +100,7 @@ have bubblewrap || die "bubblewrap no quedó en el PATH; revisá el prefijo glob
 
 # --- 3. the app has to be reachable -----------------------------------------
 
-step "3/7 · Verificando el sitio"
+step "3/8 · Verificando el sitio"
 
 manifest_code=$(curl -s -o /dev/null -w '%{http_code}' "$MANIFEST_URL")
 [ "$manifest_code" = "200" ] || die "$MANIFEST_URL devolvió $manifest_code; Bubblewrap necesita leerlo sin token"
@@ -112,7 +112,7 @@ ok "ícono de 512 accesible"
 
 # --- 4. the keystore ---------------------------------------------------------
 
-step "4/7 · Keystore"
+step "4/8 · Keystore"
 
 if [ -f "$KEYSTORE" ]; then
     ok "ya existe: $KEYSTORE"
@@ -150,7 +150,7 @@ fi
 
 # --- 5. the TWA project ------------------------------------------------------
 
-step "5/7 · Proyecto TWA"
+step "5/8 · Proyecto TWA"
 
 mkdir -p "$PROJECT_DIR"
 cd "$PROJECT_DIR"
@@ -171,6 +171,8 @@ else
     note "El resto (nombre, colores, ícono) sale del manifest y podés aceptar"
     note "los valores que propone. Si te ofrece bajar el JDK o el Android SDK,"
     note "aceptá: son más de 1 GB y es normal que tarde."
+    note "Play Billing y la delegación de ubicación las apago después; esta app"
+    note "no cobra por la tienda ni pide ubicación."
     info ""
     confirm "¿Arranco el init?" || die "cancelado"
 
@@ -178,6 +180,72 @@ else
 fi
 
 [ -f twa-manifest.json ] || die "el init no dejó twa-manifest.json; algo falló"
+
+# Bubblewrap enables Play Billing and location delegation by default. Neither is
+# free: the billing library declares minSdk 23 and the build dies on the merge
+# against the project's 21, and location delegation ships a location permission
+# in an app that never asks for one. Off unless someone opts in.
+MANIFEST_PATCHED=""
+if node -e '
+    const fs = require("fs");
+    const twa = JSON.parse(fs.readFileSync("twa-manifest.json", "utf8"));
+    const wanted = {
+        playBilling: process.env.FA_TWA_PLAY_BILLING === "1",
+        locationDelegation: process.env.FA_TWA_LOCATION === "1",
+    };
+    let changed = false;
+    twa.features = twa.features || {};
+    for (const [name, on] of Object.entries(wanted)) {
+        const feature = twa.features[name];
+        if (feature && feature.enabled !== on) { feature.enabled = on; changed = true; }
+    }
+    if (changed) fs.writeFileSync("twa-manifest.json", JSON.stringify(twa, null, 2) + "\n");
+    process.exit(changed ? 0 : 1);
+'; then
+    info "apagué playBilling y locationDelegation en twa-manifest.json"
+    note "se prenden con FA_TWA_PLAY_BILLING=1 o FA_TWA_LOCATION=1."
+    MANIFEST_PATCHED="1"
+fi
+
+# The keystore this script created is the one the owner was told to back up. If
+# the project signs with a different one — bubblewrap init proposes its own,
+# inside the project directory — that backup protects nothing.
+signing_path=$(node -e '
+    const twa = JSON.parse(require("fs").readFileSync("twa-manifest.json", "utf8"));
+    process.stdout.write(((twa.signingKey || {}).path) || "");
+')
+signing_alias=$(node -e '
+    const twa = JSON.parse(require("fs").readFileSync("twa-manifest.json", "utf8"));
+    process.stdout.write(((twa.signingKey || {}).alias) || "");
+')
+if [ "$signing_path" != "$KEYSTORE" ] || [ "$signing_alias" != "$KEY_ALIAS" ]; then
+    warn "el proyecto firma con otra clave que la que este script administra:"
+    info ""
+    info "  proyecto  ${signing_path} (alias ${signing_alias})"
+    info "  script    ${KEYSTORE} (alias ${KEY_ALIAS})"
+    info ""
+    warn "La clave que firma es la identidad permanente de la app. Si respaldaste"
+    warn "la del script y firma la otra, el respaldo no sirve para nada."
+    info ""
+    note "Todavía no publicaste el fingerprint, así que cambiarla ahora no cuesta"
+    note "nada. Después de instalar el APK en un teléfono, sí: hay que desinstalar."
+    info ""
+    if confirm "¿Paso el proyecto a firmar con ${KEYSTORE} (alias ${KEY_ALIAS})?"; then
+        [ -f "$KEYSTORE" ] || die "no existe $KEYSTORE; volvé a correr para generarlo"
+        KEYSTORE="$KEYSTORE" KEY_ALIAS="$KEY_ALIAS" node -e '
+            const fs = require("fs");
+            const twa = JSON.parse(fs.readFileSync("twa-manifest.json", "utf8"));
+            twa.signingKey = {path: process.env.KEYSTORE, alias: process.env.KEY_ALIAS};
+            fs.writeFileSync("twa-manifest.json", JSON.stringify(twa, null, 2) + "\n");
+        '
+        ok "listo. Te va a pedir la contraseña de ese keystore, no la del otro."
+        MANIFEST_PATCHED="1"
+    else
+        warn "sigo con ${signing_path}. Respaldá ESE archivo, no el otro."
+        KEYSTORE="$signing_path"
+        KEY_ALIAS="$signing_alias"
+    fi
+fi
 
 # Verify rather than assume: a mismatched package id is the single most common
 # reason the URL bar refuses to go away, and it is silent.
@@ -195,14 +263,102 @@ if [ "$actual_package" != "$PACKAGE" ]; then
         || die "corregí el packageId en twa-manifest.json y volvé a correr"
 fi
 
-# --- 6. build ----------------------------------------------------------------
+# --- 6. the android sdk ------------------------------------------------------
+#
+# Two things here that only show up at build time, both with unhelpful errors.
 
-step "6/7 · Construyendo"
+step "6/8 · SDK de Android"
+
+# The SDK that matters is the one in bubblewrap's own config, not whatever the
+# shell says. It only exists once init has run, which is why this step is here
+# and not up with the other prerequisites.
+SDK_PATH=$(node -e '
+    const fs = require("fs"), os = require("os"), path = require("path");
+    const file = path.join(os.homedir(), ".bubblewrap", "config.json");
+    if (!fs.existsSync(file)) process.exit(0);
+    process.stdout.write(JSON.parse(fs.readFileSync(file, "utf8")).androidSdkPath || "");
+' 2>/dev/null || true)
+
+if [ -z "$SDK_PATH" ]; then
+    warn "no pude leer ~/.bubblewrap/config.json; sigo y que falle bubblewrap si falta algo"
+else
+    info "SDK        $SDK_PATH"
+
+    # A second SDK in the environment is fatal: the Android Gradle plugin refuses
+    # to build when ANDROID_HOME and ANDROID_SDK_ROOT disagree, and says so 150
+    # lines into a stack trace. ANDROID_SDK_ROOT is the deprecated one, and
+    # bubblewrap sets ANDROID_HOME itself, so dropping it is the safe half.
+    if [ -n "${ANDROID_SDK_ROOT:-}" ] && [ "$ANDROID_SDK_ROOT" != "$SDK_PATH" ]; then
+        warn "ANDROID_SDK_ROOT apunta a otro SDK: $ANDROID_SDK_ROOT"
+        note "lo saco del entorno de esta corrida; el plugin de Android no construye"
+        note "con dos SDK distintos a la vista. Es la variable deprecada."
+        unset ANDROID_SDK_ROOT
+    fi
+
+    # Bubblewrap installs the build-tools itself when they are missing, but it
+    # looks for sdkmanager only at "$SDK/tools/bin" or "$SDK/bin" — paths an
+    # Android Studio SDK does not have, and which a well-meaning copy of
+    # cmdline-tools/latest/bin leaves half-working: the launcher resolves its
+    # classpath next to itself and dies with ClassNotFoundException. Installing
+    # the version it wants beforehand, with the real sdkmanager, means it never
+    # takes that path.
+    bw_bin=$(readlink -f "$(command -v bubblewrap)")
+    tools_js=$(find "$(dirname "$(dirname "$bw_bin")")" \
+        -name AndroidSdkTools.js -not -name '*.map' 2>/dev/null | head -1)
+    bt_version=""
+    if [ -n "$tools_js" ]; then
+        bt_version=$(sed -n "s/.*BUILD_TOOLS_VERSION = '\([^']*\)'.*/\1/p" "$tools_js" | head -1)
+    fi
+
+    if [ -z "$bt_version" ]; then
+        note "no pude averiguar qué build-tools pide bubblewrap; sigo igual"
+    elif [ -d "$SDK_PATH/build-tools/$bt_version" ]; then
+        ok "build-tools $bt_version presentes"
+    else
+        warn "faltan las build-tools $bt_version."
+        sdkmanager=""
+        for candidate in "$SDK_PATH/cmdline-tools/latest/bin/sdkmanager" \
+                         "$SDK_PATH/tools/bin/sdkmanager"; do
+            [ -x "$candidate" ] && { sdkmanager="$candidate"; break; }
+        done
+        [ -n "$sdkmanager" ] || die "no encontré un sdkmanager usable dentro de $SDK_PATH"
+        info "las instalo con $sdkmanager (son ~100 MB)"
+        confirm "¿Sigo?" || die "sin las build-tools no se puede construir"
+        yes | "$sdkmanager" --sdk_root="$SDK_PATH" "build-tools;$bt_version" >/dev/null \
+            || die "falló la instalación de build-tools;$bt_version"
+        [ -d "$SDK_PATH/build-tools/$bt_version" ] \
+            || die "el sdkmanager terminó bien pero no quedó $SDK_PATH/build-tools/$bt_version"
+        ok "build-tools $bt_version instaladas"
+    fi
+fi
+
+# --- 7. build ----------------------------------------------------------------
+
+step "7/8 · Construyendo"
 
 info "Te va a pedir las contraseñas del keystore."
+if [ -n "$MANIFEST_PATCHED" ]; then
+    note "y antes va a avisar que twa-manifest.json cambió: respondé que SÍ,"
+    note "los cambios son los que acaba de hacer este script."
+fi
 BUILD_LOG="$(mktemp)"
 trap 'rm -f "$BUILD_LOG"' EXIT
-bubblewrap build 2>&1 | tee "$BUILD_LOG"
+if ! bubblewrap build 2>&1 | tee "$BUILD_LOG"; then
+    printf '\n'
+    # Gradle buries the one useful line under a stack trace. When the failure
+    # came from somewhere else — the password prompt, a missing tool — there is
+    # no such block, so fall back to the tail rather than printing nothing.
+    reason=$(sed -n '/What went wrong/,/^\* Try:/p' "$BUILD_LOG")
+    if [ -n "$reason" ]; then
+        warn "la construcción falló. Lo que dijo Gradle:"
+    else
+        warn "la construcción falló. El final de la salida:"
+        reason=$(tail -20 "$BUILD_LOG")
+    fi
+    info ""
+    printf '%s\n' "$reason" | sed 's/^/    /'
+    die "corregí eso y volvé a correr"
+fi
 
 APK=""
 for candidate in app-release-signed.apk app-release-unsigned-aligned.apk; do
@@ -214,9 +370,9 @@ else
     warn "no encontré el APK en $PROJECT_DIR; mirá la salida de arriba"
 fi
 
-# --- 7. the fingerprint ------------------------------------------------------
+# --- 8. the fingerprint ------------------------------------------------------
 
-step "7/7 · Fingerprint"
+step "8/8 · Fingerprint"
 
 # Bubblewrap writes its own assetlinks.json next to the build. Reading it
 # avoids a second keytool run, which would prompt for the password again.
