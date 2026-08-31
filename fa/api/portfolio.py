@@ -18,10 +18,12 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from fa import equity, ledger, models
+from fa import cedears, equity, ledger, models
+from fa.cedear_cost import derive_cost
 from fa.api.auth import account_id
 from fa.api.deps import build_market, get_db, in_background
 from fa.config import BASE_CURRENCY
+from fa.errors import DataUnavailableError
 from fa.store import history as history_store
 from fa.store.database import Database
 
@@ -43,6 +45,7 @@ def portfolio(
     db: Database = Depends(get_db), account: int = Depends(account_id)
 ) -> dict[str, Any]:
     """Every open holding valued at its last stored close."""
+    from fa.store import positions as positions_store
     from fa.store import transactions as transactions_store
 
     rows: list[dict[str, Any]] = []
@@ -63,8 +66,17 @@ def portfolio(
         if not holding.is_open:
             continue
 
-        price, previous = _last_two_closes(db, holding.ticker)
-        if holding.currency.upper() != BASE_CURRENCY:
+        # A CEDEAR is priced through the share it represents: the bars stored
+        # under the underlying, times the published ratio. No exchange rate
+        # takes part, which is why a peso holding can join a dollar total here
+        # while a genuinely foreign one still cannot.
+        cedear = cedears.resolve(holding.ticker)
+        is_cedear = cedear is not None and cedear.supported
+        shares_per_unit = cedear.shares_per_cedear if is_cedear else 1.0
+        symbol = cedear.underlying if is_cedear else holding.ticker
+
+        price, previous = _last_two_closes(db, symbol)
+        if not is_cedear and holding.currency.upper() != BASE_CURRENCY:
             # One currency, no conversion table. Adding these into the total
             # would produce a number that looks right and is not.
             foreign.append({"ticker": holding.ticker, "currency": holding.currency})
@@ -73,20 +85,37 @@ def portfolio(
             # No stored bar means no honest valuation. Say so rather than
             # silently valuing the position at zero or at its cost.
             missing.append(holding.ticker)
-        value = holding.market_value(price) if price is not None else None
-        pnl = holding.unrealized(price) if price is not None else (None, None)
+        value = holding.market_value(price) * shares_per_unit if price is not None else None
+        # The ledger's cost is in whatever the trades were paid in, so for a
+        # CEDEAR it is pesos and cannot meet a dollar value. The position keeps
+        # the dollar cost frozen at each trade's own rate; use that instead, and
+        # value the holding at nothing rather than mix the two.
+        basis = holding.cost_basis
+        if is_cedear:
+            stored = positions_store.get_position_for_ticker(
+                db, holding.ticker, account_id=account
+            )
+            basis = stored.cost_basis_usd if stored else None
+            if basis is None:
+                missing.append(holding.ticker)
+                price, value = None, None
+        pnl = (
+            (value - basis, (value - basis) / basis * 100.0)
+            if price is not None and basis
+            else (None, None)
+        )
 
         if price is not None:
             # A holding kept out of the total has to stay out of the cost too,
             # or the P&L compares a partial value against a full basis.
-            cost_basis += holding.cost_basis
+            cost_basis += basis or 0.0
             market_value += value or 0.0
         rows.append(
             {
                 "ticker": holding.ticker,
                 "quantity": holding.quantity,
                 "average_cost": holding.average_cost,
-                "cost_basis": holding.cost_basis,
+                "cost_basis": basis,
                 "price": price,
                 "value": value,
                 "pnl_abs": pnl[0],
@@ -390,7 +419,25 @@ def add_transaction(
         )
     if body.trade_date > date.today():
         raise HTTPException(status_code=422, detail="La fecha no puede estar en el futuro.")
-    if body.currency.upper() != BASE_CURRENCY:
+    cedear = cedears.resolve(body.ticker or "")
+    fx_rate = usd_price = None
+    if body.currency.upper() != BASE_CURRENCY and cedear is not None and cedear.supported:
+        # A CEDEAR is a fixed fraction of a dollar-quoted share, so a peso trade
+        # on one converts from that day's own closes without any FX table. Any
+        # other non-base trade still cannot, and falls through to the refusal.
+        try:
+            usd_cost, fx_rate = derive_cost(
+                db,
+                cedear,
+                trade_date=body.trade_date,
+                quantity=body.quantity or 0.0,
+                ars_price=body.price or 0.0,
+                fees=body.fees or 0.0,
+            )
+        except DataUnavailableError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        usd_price = usd_cost / body.quantity if body.quantity else None
+    elif body.currency.upper() != BASE_CURRENCY:
         raise HTTPException(
             status_code=422,
             detail=(
@@ -413,6 +460,11 @@ def add_transaction(
             fees=body.fees,
             currency=body.currency,
             note=body.note,
+            # Frozen here, at the rate of the trade's own date. Nothing later
+            # recomputes them, so an old purchase's P&L stays put when the
+            # dollar moves.
+            fx_rate=fx_rate,
+            usd_price=usd_price,
         ),
         account_id=account,
     )

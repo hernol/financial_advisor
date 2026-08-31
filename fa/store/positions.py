@@ -85,16 +85,25 @@ def sync_from_ledger(
     closed = (not holding.is_open) or manually_closed
     last_sell = sells[-1] if sells else None
 
-    # Cost in the base currency for a holding bought in another one. Summed from
-    # the frozen per-unit prices rather than converted here: each buy carries the
-    # rate of its own day, and today's rate has no business rewriting them. None
-    # when no entry was ever converted, which is every ordinary holding.
-    converted = [e for e in buys if e.usd_price is not None]
-    cost_basis_usd = (
-        sum(e.usd_price * (e.quantity or 0.0) + (e.fees or 0.0) / (e.fx_rate or 1.0)
-            for e in converted)
-        if converted else None
-    )
+    # Cost in the base currency for a holding bought in another one. Each buy
+    # carries the rate of its own day, frozen when it was recorded; this blends
+    # them into one factor and applies it to the cost the ledger already tracks,
+    # so a partial sale reduces the dollar basis exactly as it reduces the peso
+    # one. Converting here against today's rate would rewrite what past trades
+    # cost. None when nothing was ever converted, which is every ordinary
+    # holding, and that is what leaves them untouched.
+    converted = [e for e in buys if e.usd_price is not None and e.price]
+    cost_basis_usd = None
+    if converted:
+        paid_foreign = sum(
+            (e.quantity or 0.0) * (e.price or 0.0) + (e.fees or 0.0) for e in converted
+        )
+        paid_base = sum(
+            (e.quantity or 0.0) * e.usd_price + (e.fees or 0.0) / (e.fx_rate or 1.0)
+            for e in converted
+        )
+        if paid_foreign:
+            cost_basis_usd = holding.cost_basis * (paid_base / paid_foreign)
 
     values = (
         holding.quantity,
