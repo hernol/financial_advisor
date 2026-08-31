@@ -94,7 +94,7 @@ una fuente más que se puede caer. No vale la pena todavía.
 
 ## 4. Componentes
 
-### `data/cedears.json` — la tabla, versionada
+### `fa/data/cedears.json` — la tabla, versionada
 
 Una entrada por CEDEAR:
 
@@ -119,6 +119,11 @@ Es lo que hace que `SID 1:8` funcione: un CEDEAR son ocho acciones, y un
 
 Versionada en git a propósito: la app nunca depende de que Comafi esté en pie,
 los canjes de ratio quedan en el historial, y los tests son deterministas.
+
+Va **dentro del paquete**, no en `data/`. `data/*` está gitignoreado —es la base
+SQLite— y además es un volumen Docker montado en `/app/data`, así que una tabla
+ahí no se commitearía y en producción quedaría tapada por el volumen. El
+Dockerfile copia `fa/`, y por ahí viaja.
 
 ### `scripts/update_cedears.py` — regenera la tabla
 
@@ -233,13 +238,27 @@ Pasa en los feriados cruzados (7 de 250 ruedas) y en compras anteriores al año 
 historia disponible. Rellenar con el CCL de hoy sería el número inventado que la
 regla prohíbe; pedirlo es decir que no se sabe y explicar por qué.
 
-## 6. Análisis y alertas
+## 6. Los dos caminos de valuación
+
+Hay **dos**, y los dos hay que tocar:
+
+| Camino | Quién lo usa | Cómo valúa |
+|---|---|---|
+| `fa/portfolio.py::build_portfolio` | CLI, `digest`, `actions`, menú | cotización en vivo vía `MarketService` |
+| `fa/api/portfolio.py::_summary` | dashboard y APK | ledger + barras guardadas |
+
+Además `fa/api/portfolio.py:393` **rechaza con 422** cualquier transacción que no
+sea USD, así que hoy una compra de CEDEARs en pesos no entra ni por la puerta.
+Esa validación pasa a aceptar ARS **sólo** cuando el ticker resuelve a un CEDEAR
+soportado; para cualquier otro papel sigue rechazando igual que hoy.
+
+## 7. Análisis y alertas
 
 No se tocan. Todo resuelve al subyacente en `MarketService` y funciona sin
 enterarse: técnicos, fundamentals, ratios, alertas, informes de IA. Y funciona
 *mejor* que sobre la serie en pesos, por lo medido en la sección 2.
 
-## 7. Lo que no se hace
+## 8. Lo que no se hace
 
 data912 y dolarapi sirvieron para validar el diseño y **no quedan como
 dependencia de la aplicación**. Sin especies C ni D, sin CCL de mercado, sin
@@ -249,7 +268,7 @@ Si mañana entran bonos, opciones o FCI, este diseño no estorba para llegar a u
 `Position.instrument` genérico. Hoy sería armar el andamiaje para un solo tipo
 de instrumento nuevo.
 
-## 8. Pruebas
+## 9. Pruebas
 
 TDD, con un fixture chico en vez de las 312 filas reales: los tests tienen que
 ser deterministas y no tocar la red.
@@ -265,12 +284,12 @@ Casos que van sí o sí:
 
 Sin tests que peguen contra la red ni contra la base real del usuario.
 
-## 9. Alcance
+## 10. Alcance
 
 | Archivo | Cambio |
 |---|---|
 | `fa/cedears.py` | nuevo — resolver y modelo |
-| `data/cedears.json` | nuevo — tabla versionada |
+| `fa/data/cedears.json` | nuevo — tabla versionada |
 | `scripts/update_cedears.py` | nuevo — regenera y valida |
 | `fa/market.py` | resolución en `quote`, `context`, `fundamentals` |
 | `fa/portfolio.py` | valuación vía subyacente; `Holding.shares_per_unit` y `Holding.cedear` |
@@ -279,12 +298,17 @@ Sin tests que peguen contra la red ni contra la base real del usuario.
 | `fa/store/migrations.py` | migración 14 — costo congelado |
 | `fa/store/positions.py` | leer y escribir `cost_basis_usd` |
 | `fa/store/transactions.py` | leer y escribir `fx_rate` y `usd_price` |
+| `fa/api/portfolio.py` | aceptar ARS para un CEDEAR; valuar en `_summary` |
 
-**No toca** `analytics.py`, `indicators/`, `alerts/`, `metrics.py` ni `ai.py`.
-Que la lista sea corta es la razón por la que se eligió la capa de traducción y
-no un instrumento de primera clase en el modelo.
+**No toca** `analytics.py`, `indicators/`, `alerts/`, `metrics.py` ni `ai.py`:
+todo eso recibe el subyacente ya resuelto y no se entera. Que la lista termine
+ahí es la razón por la que se eligió la capa de traducción y no un instrumento
+de primera clase en el modelo.
 
-## 10. Riesgos
+Corregido después de leer el código: una versión anterior de esta spec decía que
+la API no se tocaba y ponía la tabla en `data/`. Las dos cosas eran falsas.
+
+## 11. Riesgos
 
 - **Comafi cambia el HTML.** Rompe `update_cedears.py`, no la aplicación: la
   tabla está versionada y sigue sirviendo. Se arregla el parser cuando pase.
