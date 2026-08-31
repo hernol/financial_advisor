@@ -8,6 +8,8 @@ from typing import Sequence
 
 import pandas as pd
 
+from fa import cedears
+from fa.cedears import Cedear
 from fa.config import ANALYSIS_HISTORY_PERIOD, DEFAULT_BENCHMARK, DEFAULT_HISTORY_PERIOD
 from fa.errors import DataUnavailableError
 from fa.metrics import build_tables
@@ -60,14 +62,37 @@ class MarketService:
     def providers(self) -> tuple[str, ...]:
         return self._chain.names
 
+    def resolve_symbol(self, ticker: str) -> tuple[str, Cedear | None]:
+        """The symbol to fetch, and the CEDEAR it stands for.
+
+        A CEDEAR is contractually a fraction of the underlying share, so every
+        question about it - price, history, statements, technicals - is really a
+        question about that share, asked in dollars instead of pesos. Resolving
+        here, at the one facade every consumer goes through, is what lets the
+        rest of the application stay unaware that CEDEARs exist.
+
+        The substitution is deliberate and stays visible: the Quote that comes
+        back says AAPL, not AAPL.BA, and callers that care carry both.
+        """
+        symbol = (ticker or "").upper()
+        cedear = cedears.resolve(symbol)
+        if cedear is None:
+            return symbol, None
+        if not cedear.supported:
+            raise DataUnavailableError(
+                f"{symbol} es un CEDEAR sin subyacente utilizable: {cedear.reason}."
+            )
+        return cedear.underlying.upper(), cedear
+
     def quote(self, ticker: str) -> Quote:
+        symbol, _ = self.resolve_symbol(ticker)
         started = time.monotonic()
         try:
-            quote = self._chain.get_quote(ticker)
+            quote = self._chain.get_quote(symbol)
         except DataUnavailableError as exc:
-            self._log_fetch(ticker, "quote", "", started, error=exc)
+            self._log_fetch(symbol, "quote", "", started, error=exc)
             raise
-        self._log_fetch(ticker, "quote", quote.source, started)
+        self._log_fetch(symbol, "quote", quote.source, started)
         if self._conn is not None:
             events_store.save_snapshot(self._conn, quote)
         return quote
@@ -106,10 +131,12 @@ class MarketService:
         self, ticker: str, *, since: date | None = None, period: str = DEFAULT_HISTORY_PERIOD
     ) -> MarketContext:
         """Build (and memoise) everything the alert rules need for a ticker."""
-        key = f"{ticker.upper()}@{period}"
+        # Keyed on the resolved symbol, so AAPL and AAPL.BA share one fetch
+        # instead of building the same context twice under two spellings.
+        symbol, _ = self.resolve_symbol(ticker)
+        key = f"{symbol}@{period}"
         if key in self._contexts:
             return self._contexts[key]
-        symbol = ticker.upper()
         quote = self.quote(symbol)
         started = time.monotonic()
         try:
@@ -145,7 +172,8 @@ class MarketService:
             logger.exception("could not archive bars for %s", ticker)
 
     def fundamentals(self, ticker: str) -> Fundamentals:
-        return self._chain.get_fundamentals(ticker)
+        symbol, _ = self.resolve_symbol(ticker)
+        return self._chain.get_fundamentals(symbol)
 
     def analysis_tables(
         self, ticker: str, *, since: date | None = None
@@ -155,8 +183,9 @@ class MarketService:
         A five year history is used so each reporting period can be priced with
         its own historic close instead of today's price.
         """
-        context = self.context(ticker, since=since, period=ANALYSIS_HISTORY_PERIOD)
-        fundamentals = self._chain.get_fundamentals(ticker)
+        symbol, _ = self.resolve_symbol(ticker)
+        context = self.context(symbol, since=since, period=ANALYSIS_HISTORY_PERIOD)
+        fundamentals = self._chain.get_fundamentals(symbol)
         # The quote knows what money it is in; without handing that over, the
         # tables cannot tell a TWD statement from a USD one.
         annual, quarterly = build_tables(
