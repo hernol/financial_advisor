@@ -11,16 +11,28 @@ Lo sirve nginx y no la app, por tres razones: es una afirmación sobre el
 dominio y no contenido de la aplicación, tiene que responder aunque el
 dashboard esté caído, y cambiarlo no necesita reconstruir la imagen.
 
-**El fingerprint de acá es un placeholder.** `scripts/build-apk.sh` construye
-el APK y lo imprime al final, además de avisar si este archivo todavía no
-coincide. A mano, sale del keystore con el que se firma:
+El fingerprint de acá es el del keystore `~/keys/financial-analyzer.keystore`
+(alias `analyzer`), el que `scripts/build-apk.sh` administra y el script imprime
+al final de cada corrida, avisando si este archivo todavía no coincide.
+
+A mano sale del APK firmado, que es la fuente honesta —dice qué firmó de verdad,
+no qué dice tener el keystore— y además no pide contraseña:
 
 ```bash
-keytool -list -v -keystore android.keystore -alias android | grep 'SHA256:'
+apksigner verify --print-certs app-release-signed.apk
 ```
 
-Bubblewrap también lo imprime al terminar `build`, y lo deja en
-`assetlinks.json` dentro de su propio directorio de trabajo.
+Lo imprime en minúscula y sin separadores; acá va en mayúscula y con `:` cada
+dos dígitos. Desde el keystore, si hiciera falta:
+
+```bash
+keytool -list -v -keystore ~/keys/financial-analyzer.keystore -alias analyzer \
+    | grep 'SHA256:'
+```
+
+Bubblewrap **no** deja ningún `assetlinks.json` al construir: eso lo hace
+`bubblewrap fingerprint generateAssetLinks`, que es otro comando. El script no
+lo usa.
 
 El `package_name` tiene que coincidir exactamente con el `applicationId` que se
 le dio a Bubblewrap. Si cambia uno, cambia el otro.
