@@ -134,6 +134,21 @@ resuelve, o no cotiza en USD, queda `supported: false` con el motivo escrito.
 Que valide es la parte que importa: la tabla se publica sabiendo cuáles andan,
 en vez de descubrirlo en producción mientras valúa la cartera.
 
+**Corregido al implementar.** La primera corrida marcó 33 de 312 como
+inutilizables, y la lista estaba mal: BK, MMC, WBA, ERJ y X son papeles vivos y
+líquidos de NYSE que no devolvieron datos en la misma corrida donde AAPL
+contestó normal. El validador consulta yfinance solo, mientras que la aplicación
+consulta una cadena de tres, así que un silencio acá no dice nada sobre si Alpha
+Vantage o Finnhub podían darlo.
+
+Por eso el veredicto se parte en dos. `supported: false` sólo por causas
+**estructurales**: el símbolo no se pudo traducir, o se lo vio cotizando en otra
+moneda. Las dos son propiedades del instrumento. Un proveedor que simplemente no
+contestó deja la entrada usable con `verified: false`, y el runtime se niega
+honestamente en el momento en que de verdad no puede conseguir el precio. Eso
+llevó la lista de no soportados de 33 a **7** — los listados de Frankfurt en
+euros, que es lo que siempre debió ser.
+
 Imprime un diff contra el JSON actual antes de escribir, así un cambio de ratio
 se ve y se revisa antes de commitearlo. No corre solo ni desde la app.
 
@@ -174,12 +189,15 @@ donde el ticker local difiere del subyacente:
 | `/` → `-` | `BRK/B` → `BRK-B` | ✅ 504,03 USD |
 | sufijo ` US` → sacar | `VIST US` → `VIST` | ✅ 71,46 USD |
 | sufijo ` LI` → `.IL` | `SMSN LI` → `SMSN.IL` | ✅ 4.758 USD (GDR en USD) |
+| `.` de clase → `-` | `AKO.B` → `AKO-B` | ✅ 29,19 USD |
 | sufijo ` GR` → `.DE` | `BAS GR` → `BAS.DE` | ❌ cotiza en **EUR** |
 | ADR dado de baja | `OGZPY`, `LUKOY`, `NLMK`, `TEF` | ❌ sin datos |
 
-Quedan **14 no soportados** de 312: siete cotizando en Frankfurt, en euros
-(BASF, Bayer, Danone, Deutsche Telekom, E.ON, Mercedes-Benz, NEC) y siete ADRs sin
-datos, en su mayoría rusos dados de baja por sanciones.
+Quedan **7 no soportados** de 312, todos cotizando en Frankfurt en euros: BASF,
+Bayer, Danone, Deutsche Telekom, E.ON, Mercedes-Benz y NEC. Otros 25 quedan
+soportados pero sin verificar, porque el proveedor no contestó por ellos el día
+de la generación — entre ellos los ADRs rusos dados de baja por sanciones, que
+probablemente no anden, y BK o MMC, que casi seguro sí.
 
 No se les inventa un mapeo. Adivinar el sufijo Yahoo de un listado extranjero
 es exactamente el tipo de dato fabricado que la regla del proyecto prohíbe. Un
