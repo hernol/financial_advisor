@@ -81,3 +81,31 @@ def test_the_holding_says_it_is_a_cedear(conn):
     assert holding.position.ticker == "AAPL.BA"
     assert holding.cedear.underlying == "AAPL"
     assert holding.shares_per_unit == pytest.approx(1 / 20)
+
+
+def test_the_pnl_never_compares_dollars_against_pesos(conn):
+    """buy_price is in pesos for a CEDEAR; the price is in dollars.
+
+    Subtracting one from the other is the meaningless number the currency rule
+    exists to prevent, so it uses the frozen dollar cost or reports nothing.
+    """
+    hold(conn, "AAPL.BA", 20)   # buy_price 25000 ARS, no conversion recorded
+    holding = build_portfolio(conn, StubMarket(price=316.85), record=False).holdings[0]
+    assert holding.pnl is None
+
+
+def test_the_pnl_uses_the_frozen_dollar_cost_when_there_is_one(conn):
+    from fa.models import Transaction
+    from fa.store import positions as positions_store
+    from fa.store import transactions as transactions_store
+
+    transactions_store.record(conn, Transaction(
+        ticker="AAPL.BA", kind="buy", trade_date=date(2026, 6, 2),
+        quantity=20, price=25340.0, currency="ARS",
+        fx_rate=1599.5, usd_price=316.85 / 20,
+    ))
+    positions_store.sync_from_ledger(conn, "AAPL.BA")
+    holding = build_portfolio(conn, StubMarket(price=633.70), record=False).holdings[0]
+    absolute, pct = holding.pnl
+    assert absolute == pytest.approx(316.85, rel=1e-3)   # doubled
+    assert pct == pytest.approx(100.0, rel=1e-2)

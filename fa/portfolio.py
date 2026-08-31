@@ -49,8 +49,35 @@ class Holding:
         return self.currency.upper() == BASE_CURRENCY
 
     @property
+    def basis(self) -> float | None:
+        """What the holding cost, in the same currency as ``market_value``.
+
+        For an ordinary holding that is the position's own cost. For a CEDEAR
+        the position was paid for in pesos, so its cost_basis is in pesos and
+        cannot meet a dollar value; the dollar cost frozen at each trade's own
+        rate is used instead. None when no conversion was ever recorded, which
+        is the honest answer rather than a number in the wrong currency.
+        """
+        if self.cedear is None:
+            return self.position.cost_basis
+        return self.position.cost_basis_usd
+
+    @property
     def pnl(self) -> tuple[float, float] | None:
-        return None if self.price is None else self.position.unrealized(self.price)
+        """(absolute, percentage), or nothing when the two sides do not compare.
+
+        Subtracting a peso cost from a dollar value produces a number that looks
+        like a result and is a currency error: on a healthy CEDEAR holding it
+        read -98.7%. Reporting nothing says what is actually known.
+        """
+        if self.price is None:
+            return None
+        if self.cedear is None:
+            return self.position.unrealized(self.price)
+        basis, value = self.basis, self.market_value
+        if not basis or value is None:
+            return None
+        return value - basis, (value - basis) / basis * 100.0
 
 
 @dataclass(frozen=True)
@@ -59,7 +86,12 @@ class Portfolio:
 
     @property
     def cost_basis(self) -> float:
-        return sum(h.position.cost_basis for h in self.holdings)
+        """Total cost, in the base currency only.
+
+        A holding whose cost could not be expressed in it contributes nothing
+        rather than contributing pesos, for the same reason its value stays out.
+        """
+        return sum(h.basis or 0.0 for h in self.holdings)
 
     @property
     def market_value(self) -> float:
