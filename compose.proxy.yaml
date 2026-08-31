@@ -19,6 +19,9 @@ services:
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./proxy/conf.d:/etc/nginx/conf.d:ro
+      # assetlinks.json y cualquier otra verificacion de dominio. Montado y
+      # no copiado: cambiar el fingerprint es editar y recargar.
+      - ./proxy/well-known:/etc/nginx/well-known:ro
       # Sólo lectura: el proxy usa los certificados del host, no los administra.
       # certbot los renueva y sigue siendo el dueño.
       - /etc/letsencrypt:/etc/letsencrypt:ro

@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "ar.com.hernol.analyzer",
+      "sha256_cert_fingerprints": [
+        "PENDIENTE-REEMPLAZAR-POR-EL-SHA256-DEL-KEYSTORE"
+      ]
+    }
+  }
+]
