@@ -326,7 +326,30 @@ de primera clase en el modelo.
 Corregido después de leer el código: una versión anterior de esta spec decía que
 la API no se tocaba y ponía la tabla en `data/`. Las dos cosas eran falsas.
 
-## 11. Riesgos
+## 11. Qué cubre la tabla, y qué no
+
+Verificado el 2026-09-01 contra un segundo documento de Comafi, el prospecto
+`13-CEDEARs-ETFs-08012025.pdf` (escaneado con capa de texto; se extrajo sin
+librería, con zlib y los operadores de texto del PDF).
+
+**Los 16 ETFs de la tabla coinciden exactamente con el prospecto**: IEUR 11:1,
+IBB 27:1, VEA 10:1, IVE 40:1, IVW 20:1, XLC 19:1, XLY 43:1, XLB 18:1, XLI 28:1,
+XLK 46:1, XLV 29:1, XLP 16:1, más FXI e IBIT por sus prospectos propios. Doce
+ratios cross-validados contra una fuente independiente de la página HTML.
+
+**`SPY.BA` y `QQQ.BA` cotizan en BYMA pero no están.** No aparecen en ningún
+prospecto de Comafi —ni "Invesco" ni "SPDR S&P 500" figuran en el documento— así
+que los emite otro depositario, que no publica una tabla que se pueda parsear.
+No se les inventa el ratio: derivarlo de los precios es exactamente lo que la
+sección 4 prohíbe.
+
+La consecuencia es benigna y explícita: `resolve()` devuelve `None`, el papel se
+trata como un `.BA` cualquiera, cotiza en pesos y **queda fuera del total con el
+motivo escrito**, que además aclara que lo que falta es el ratio y no el precio.
+Para seguir al S&P y al Nasdaq, `SPY` y `QQQ` en dólares funcionan enteros, y
+`IVE`/`IVW` son CEDEARs del S&P 500 que sí están.
+
+## 12. Riesgos
 
 - **Comafi cambia el HTML.** Rompe `update_cedears.py`, no la aplicación: la
   tabla está versionada y sigue sirviendo. Se arregla el parser cuando pase.

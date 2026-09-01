@@ -109,3 +109,17 @@ def test_the_pnl_uses_the_frozen_dollar_cost_when_there_is_one(conn):
     absolute, pct = holding.pnl
     assert absolute == pytest.approx(316.85, rel=1e-3)   # doubled
     assert pct == pytest.approx(100.0, rel=1e-2)
+
+
+def test_an_unknown_ba_ticker_says_it_is_not_a_known_cedear(conn):
+    """SPY.BA and QQQ.BA quote on BYMA but come from a depositary that publishes
+    no ratio table, so they are not in ours. Falling back to the generic
+    foreign-currency message is true but useless: it does not say that the
+    ratio is what is missing, which is the thing a person could act on.
+    """
+    hold(conn, "SPY.BA", 10)
+    portfolio = build_portfolio(conn, StubMarket(price=20460.0, currency="ARS"),
+                                record=False)
+    error = portfolio.excluded[0].error
+    assert "SPY.BA" in error
+    assert "ratio" in error

@@ -142,15 +142,26 @@ def build_portfolio(
         if quote.currency.upper() != BASE_CURRENCY:
             # Yahoo reports the listing's own currency. Adding a euro price into
             # a dollar total would look like a number and be a lie.
+            reason = (
+                f"{position.ticker} cotiza en {quote.currency} y la cartera se "
+                f"valúa en {BASE_CURRENCY}: queda fuera del total."
+            )
+            if position.ticker.upper().endswith(cedears.SUFFIX):
+                # It quotes on BYMA and we could not resolve it, which for a
+                # CEDEAR means we lack the ratio, not the price. SPY.BA and
+                # QQQ.BA are the live example: they come from a depositary that
+                # publishes no table. Saying only "it is in pesos" is true and
+                # useless - this says which fact is missing.
+                reason += (
+                    " No está en la tabla de CEDEARs, así que falta el ratio contra"
+                    " el subyacente y no se puede valuar sin inventarlo."
+                )
             holdings.append(
                 Holding(
                     position=position,
                     price=None,
                     currency=quote.currency,
-                    error=(
-                        f"{position.ticker} cotiza en {quote.currency} y la cartera se "
-                        f"valúa en {BASE_CURRENCY}: queda fuera del total."
-                    ),
+                    error=reason,
                 )
             )
             continue
