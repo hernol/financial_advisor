@@ -6,7 +6,7 @@ from typing import Any, Mapping, Sequence
 
 import pandas as pd
 
-from fa import ratios
+from fa import fx, ratios
 from fa.models import Fundamentals, PricePoint
 
 # Kept for backwards compatibility; the real net debt is used whenever the
@@ -26,6 +26,8 @@ COLUMNS = [
     "Net_Debt",
     "Net_Debt_Estimated",
     "Currency_Mismatch",
+    "Currency_Converted",
+    "FX_Rate",
     "Operating_Cash_Flow",
     "CapEx",
     "FCF",
@@ -89,6 +91,7 @@ def build_frame(
     *,
     statement_currency: str = "",
     quote_currency: str = "",
+    fx_history: Sequence[PricePoint] = (),
 ) -> pd.DataFrame:
     """Turn provider rows into the derived-metrics table (values in millions).
 
@@ -98,9 +101,13 @@ def build_frame(
     FCF yield of 63% against a real ~2%. Those are not approximations, they are
     the exchange rate wearing a metric's name.
 
-    Converting instead was the alternative and it is worse: today's rate applied
-    to a 2023 balance sheet invents a precision nobody has, and this codebase
-    does not manufacture numbers. Blank says "unknown", which is true.
+    Given ``fx_history`` they are computed instead, each period converted at the
+    rate of its own close. That is a real market price rather than a guess, and
+    it is not the thing rejected here before: today's rate applied to a 2023
+    balance sheet invents a precision nobody has. The rate moved 15% across the
+    five years measured, which is exactly why the period's own one is needed.
+    Without a rate at or before a period's end that period stays blank, because
+    blank says "unknown", which is true.
     """
     # Unknown on either side is not a mismatch: nothing can be concluded, and
     # blanking on a guess would hide figures that are probably fine.
@@ -117,6 +124,16 @@ def build_frame(
         price = close_on_or_before(history, period_end) if period_end else None
         if price is None:
             price = current_price
+        # Growth spans two periods that convert at two different rates, so it is
+        # measured on the figures as reported. In dollars TSMC's 2024 revenue
+        # growth reads about 25% against a real 33.9%, the gap being the
+        # currency's own move - a true answer to a different question.
+        reported_revenue = row.get("revenue")
+        reported_net_income = row.get("net_income")
+        rate = close_on_or_before(fx_history, period_end) if mixed and period_end else None
+        converted = bool(mixed and rate and rate > 0)
+        if converted:
+            row = fx.row_to_usd(row, rate)
         ocf = row.get("operating_cash_flow")
         capex = row.get("capex")
         assets = row.get("total_assets")
@@ -134,8 +151,8 @@ def build_frame(
         # end, not today's.
         earnings_per_share = ratios.eps(net_income, shares_outstanding)
         pe = ratios.price_earnings(price, earnings_per_share)
-        earnings_growth = ratios.growth_pct(net_income, previous_net_income)
-        if mixed:
+        earnings_growth = ratios.growth_pct(reported_net_income, previous_net_income)
+        if mixed and not converted:
             # Everything downstream of a price divided by a statement line.
             # Growth and the margins survive: both sides of those are in the
             # same money, so they were never affected.
@@ -154,6 +171,8 @@ def build_frame(
                 "Net_Debt": debt_value,
                 "Net_Debt_Estimated": estimated,
                 "Currency_Mismatch": mixed,
+                "Currency_Converted": converted,
+                "FX_Rate": rate if converted else None,
                 "Operating_Cash_Flow": ocf,
                 "CapEx": capex,
                 "FCF": fcf,
@@ -171,7 +190,7 @@ def build_frame(
                 "Gross_Margin": ratios.margin(row.get("gross_profit"), revenue),
                 "Operating_Margin": ratios.margin(operating_income, revenue),
                 "Net_Margin": ratios.margin(net_income, revenue),
-                "Revenue_Growth": ratios.growth_pct(revenue, previous_revenue),
+                "Revenue_Growth": ratios.growth_pct(reported_revenue, previous_revenue),
                 "Interest_Coverage": ratios.interest_coverage(
                     operating_income, row.get("interest_expense")
                 ),
@@ -180,8 +199,13 @@ def build_frame(
                 "Net_Debt_to_FCF": ratios.leverage(debt_value, fcf),
             }
         )
-        previous_revenue = revenue if revenue is not None else previous_revenue
-        previous_net_income = net_income if net_income is not None else previous_net_income
+        # Carried in the reported currency, to keep growth free of the rate.
+        previous_revenue = (
+            reported_revenue if reported_revenue is not None else previous_revenue
+        )
+        previous_net_income = (
+            reported_net_income if reported_net_income is not None else previous_net_income
+        )
     frame = pd.DataFrame(records, columns=COLUMNS)
     return frame
 
@@ -198,12 +222,14 @@ def build_tables(
     current_price: float,
     *,
     quote_currency: str = "",
+    fx_history: Sequence[PricePoint] = (),
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Annual and quarterly metric tables for a ticker."""
     shares = fundamentals.shares_outstanding
     kwargs = {
         "statement_currency": fundamentals.currency,
         "quote_currency": quote_currency,
+        "fx_history": fx_history,
     }
     annual = build_frame(fundamentals.annual, history, shares, current_price, **kwargs)
     quarterly = build_frame(fundamentals.quarterly, history, shares, current_price, **kwargs)
@@ -213,11 +239,24 @@ def build_tables(
 def to_payload(annual: pd.DataFrame, quarterly: pd.DataFrame, source: str) -> str:
     """Plain-text rendering handed to the AI analyst."""
     note = ""
-    if _has_currency_mismatch(annual) or _has_currency_mismatch(quarterly):
+    if _has_currency_conversion(annual) or _has_currency_conversion(quarterly):
+        # Saying "blank" here once the figures exist would have the analyst
+        # discount numbers that are present and right.
         note += (
             "\nNOTE: the statements are reported in a different currency than the share "
-            "trades in, so every price-derived ratio (P/E, PEG, EPS, FCF yield, EV) is blank "
-            "rather than wrong. Do not compare the absolute figures to the share price.\n"
+            "trades in. Every money figure has been converted to the quote's currency at "
+            "the exchange rate of each period's own close (see FX_Rate), so the "
+            "price-derived ratios are computed and comparable. Two caveats: the closing "
+            "rate is used for the income statement as well as the balance sheet, where "
+            "strictly an average rate belongs; and Revenue_Growth and Earnings_Growth are "
+            "measured on the figures as reported, so they carry no currency movement.\n"
+        )
+    elif _has_currency_mismatch(annual) or _has_currency_mismatch(quarterly):
+        note += (
+            "\nNOTE: the statements are reported in a different currency than the share "
+            "trades in, and no exchange rate was available, so every price-derived ratio "
+            "(P/E, PEG, EPS, FCF yield, EV) is blank rather than wrong. Do not compare the "
+            "absolute figures to the share price.\n"
         )
     if _has_estimated_debt(annual) or _has_estimated_debt(quarterly):
         # Appended, not assigned: both caveats can apply to the same ticker and
@@ -237,6 +276,10 @@ def to_payload(annual: pd.DataFrame, quarterly: pd.DataFrame, source: str) -> st
 
 def _has_currency_mismatch(frame: pd.DataFrame) -> bool:
     return "Currency_Mismatch" in frame.columns and bool(frame["Currency_Mismatch"].any())
+
+
+def _has_currency_conversion(frame: pd.DataFrame) -> bool:
+    return "Currency_Converted" in frame.columns and bool(frame["Currency_Converted"].any())
 
 
 def _has_estimated_debt(frame: pd.DataFrame) -> bool:

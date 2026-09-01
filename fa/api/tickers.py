@@ -338,13 +338,22 @@ def ticker_fundamentals(
         for period in periods.values()
         for row in period["rows"]
     )
+    # Mixed only while it is still unresolved. Once the period was converted the
+    # ratios are there and correct, and warning about them would be wrong; what
+    # travels instead is that the figures are converted, not as reported.
+    converted_currency = any(
+        row.get("Currency_Converted")
+        for period in periods.values()
+        for row in period["rows"]
+    )
     mixed_currency = any(
-        row.get("Currency_Mismatch")
+        row.get("Currency_Mismatch") and not row.get("Currency_Converted")
         for period in periods.values()
         for row in period["rows"]
     )
     return {
         "ticker": symbol,
+        "converted_currency": converted_currency,
         "summary_columns": SUMMARY_FIELDS,
         "quality_columns": QUALITY_FIELDS,
         "periods": periods,

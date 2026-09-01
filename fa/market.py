@@ -8,7 +8,7 @@ from typing import Sequence
 
 import pandas as pd
 
-from fa import cedears
+from fa import cedears, fx
 from fa.cedears import Cedear
 from fa.config import ANALYSIS_HISTORY_PERIOD, DEFAULT_BENCHMARK, DEFAULT_HISTORY_PERIOD
 from fa.errors import DataUnavailableError
@@ -37,6 +37,7 @@ class MarketService:
         self._benchmark = (benchmark or "").upper()
         self._contexts: dict[str, MarketContext] = {}
         self._benchmarks: dict[str, Sequence[PricePoint]] = {}
+        self._fx: dict[str, Sequence[PricePoint]] = {}
 
     @property
     def benchmark(self) -> str:
@@ -193,5 +194,32 @@ class MarketService:
             context.history,
             context.quote.price,
             quote_currency=context.quote.currency,
+            fx_history=self._fx_history(fundamentals.currency, context.quote.currency),
         )
         return annual, quarterly, fundamentals, context
+
+    def _fx_history(self, statement_currency: str, quote_currency: str) -> Sequence[PricePoint]:
+        """Rates for a company that reports in one currency and trades in another.
+
+        Fetched only when the two differ, and memoised for the run. A failure
+        degrades to an empty series, which puts the crossing ratios back to
+        blank - the behaviour before rates existed, and the honest one.
+        """
+        statement = (statement_currency or "").upper()
+        quote = (quote_currency or "").upper()
+        if not statement or not quote or statement == quote:
+            return ()
+        if statement in self._fx:
+            return self._fx[statement]
+        try:
+            symbol = fx.pair_symbol(statement)
+        except ValueError:
+            logger.warning("moneda de balances no reconocida: %r", statement_currency)
+            self._fx[statement] = ()
+            return ()
+        try:
+            self._fx[statement] = self._chain.get_history(symbol, ANALYSIS_HISTORY_PERIOD)
+        except DataUnavailableError:
+            logger.warning("sin cotizaciones de %s: las ratios cruzadas quedan en blanco", symbol)
+            self._fx[statement] = ()
+        return self._fx[statement]
