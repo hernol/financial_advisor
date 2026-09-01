@@ -2,8 +2,8 @@
 
 Documento de trabajo. Escrito el 2026-08-26, desplegado el 2026-08-28.
 
-> **Estado: andando en https://hernol.com.ar.** Fases 0, 1 y 2 completas; la 3
-> quedó desbloqueada. Lo que sigue vale como registro de lo hecho y como guía
+> **Estado: andando en https://hernol.com.ar.** Fases 0 a 3 completas: el APK
+> está instalado y funcionando en el teléfono del dueño. Lo que sigue vale como registro de lo hecho y como guía
 > para las fases 3 a 5.
 
 **Objetivo final**: backend hosteado, clientes móviles, suscripciones.
@@ -272,17 +272,34 @@ reporta `isSecureContext: false` y el service worker no registra. O sea que la
 Fase 3 **no arranca** hasta que esté la 2 — no es cuestión de configurar mejor.
 
 **Desbloqueada el 2026-08-28.** Sobre `https://hernol.com.ar` el navegador
-reporta `isSecureContext: true` y el service worker registra. Falta: íconos PNG,
-`assetlinks.json` en `/.well-known/`, y Bubblewrap para generar el APK.
+reporta `isSecureContext: true` y el service worker registra.
 
-- Verificar "Agregar a pantalla de inicio" en Chrome Android.
-- Íconos PNG además del SVG actual (Play Store los exige en varios tamaños).
-- `assetlinks.json` servido en `/.well-known/` para que el TWA saque la barra
-  del navegador.
-- Bubblewrap para generar el APK/AAB.
+**Completa el 2026-09-01: el APK está instalado y anda.**
+
+Lo que se hizo:
+
+- Íconos PNG en 192, 512 y 512 maskable, renderizados por `scripts/make_icons.py`
+  desde la misma geometría del SVG, porque en el servidor no hay rasterizador.
+  El SVG dejó de declararse `maskable`: su trazo llega a 228 unidades del centro
+  sobre un lienzo de 512 y el recorte maskable corta en 204,8, así que nunca lo
+  fue.
+- `assetlinks.json` servido por nginx desde `proxy/well-known/`, no por la app.
+  La `location /.well-known/` no pisa el `acme-challenge`, que tiene el prefijo
+  más largo y gana igual; verificado con `certbot renew --dry-run`, que importa
+  porque ese certificado también sirve el TLS del mail.
+- `scripts/build-apk.sh`: un script interactivo que hace los siete pasos en la
+  máquina del dueño. Nunca pisa un keystore existente, las contraseñas las pide
+  `keytool` y no pasan por `argv`, verifica que el manifest y el ícono de 512
+  respondan 200 sin token, compara el `packageId` contra el que publica el
+  servidor, y se niega a ofrecer la instalación mientras el fingerprint no
+  coincida con el publicado.
+- El fingerprint real quedó publicado en `assetlinks.json` (`ff4f01e`).
 
 *Listo cuando*: el APK abre a pantalla completa, sin barra de URL, contra el
-dominio real.
+dominio real. **Cumplido.**
+
+Pendiente sólo si se quiere distribuir: la Play Store pide AAB firmado, ficha y
+política de privacidad. Para uso propio, el APK sideloadeado alcanza.
 
 ### Fase 4 — Trabajos del servidor
 
