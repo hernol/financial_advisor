@@ -160,3 +160,35 @@ def test_the_ai_note_still_warns_when_nothing_could_be_converted():
 
     payload = to_payload(_frame(), _frame(), "test")
     assert "blank" in payload
+
+
+# --- what reaches the dashboard --------------------------------------------
+
+
+def test_the_api_says_the_figures_were_converted(conn):
+    """A converted figure must never render as a reported one, so the flag has
+    to travel all the way to the client."""
+    import pandas as pd
+    from fastapi.testclient import TestClient
+
+    from fa.api import deps
+    from fa.api.app import create_app
+    from fa.store import fundamentals as fundamentals_store
+
+    frame = pd.DataFrame([{
+        "Period": "2024", "Currency_Mismatch": True, "Currency_Converted": True,
+        "FX_Rate": 32.76, "PE": 29.0,
+    }])
+    fundamentals_store.save(conn, "TSM", fundamentals_store.ANNUAL, frame, source="yahoo")
+
+    deps.set_database(conn)
+    try:
+        with TestClient(create_app(serve_web=False)) as client:
+            body = client.get("/api/tickers/TSM/fundamentals").json()
+    finally:
+        deps.set_database(None)
+
+    assert body["converted_currency"] is True
+    # Not "mixed" any more: the ratios are there, so warning about blanks would
+    # point at numbers that exist.
+    assert body["currency_mismatch"] is False

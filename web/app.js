@@ -1449,9 +1449,17 @@ function paintFundamentals(body) {
   // of blanks, so neither can silently replace the other.
   const warnings = [];
   if (body.currency_mismatch) {
-    warnings.push('Los estados contables están en otra moneda que la acción: '
-      + 'P/E, PEG, EPS, FCF yield y EV quedan en blanco en vez de mal. '
-      + 'Los márgenes y el crecimiento siguen siendo válidos.');
+    warnings.push('Los estados contables están en otra moneda que la acción y no '
+      + 'se consiguió el tipo de cambio: P/E, PEG, EPS, FCF yield y EV quedan en '
+      + 'blanco en vez de mal. Los márgenes y el crecimiento siguen siendo válidos.');
+  }
+  if (body.converted_currency) {
+    // The figures are right, but they are not what the company reported, and a
+    // converted number that reads as reported is the failure to avoid here.
+    warnings.push('Los estados contables están en otra moneda que la acción: las '
+      + 'cifras fueron convertidas al tipo de cambio del cierre de cada período, '
+      + 'así que no son las reportadas por la empresa. El crecimiento se mide '
+      + 'sobre las cifras originales, para que no arrastre el movimiento de la moneda.');
   }
   if (body.net_debt_estimated) {
     warnings.push('En algún período el proveedor no reportó deuda total y caja: '
