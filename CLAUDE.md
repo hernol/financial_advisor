@@ -43,16 +43,60 @@ Cuando no se sabe, se dice que no se sabe y se explica por qué.
 
 ## Cómo probar
 
+**En el servidor no hay `.venv` ni Python con las dependencias.** La suite corre
+dentro de la imagen de producción, y hay que montarle cuatro cosas porque el
+`Dockerfile` sólo copia `financial_analyzer.py` y `fa/`:
+
 ```bash
-.venv/bin/python -m pytest                    # SQLite
-FA_TEST_DATABASE_URL=postgresql://... pytest  # Postgres
+docker compose run --rm --entrypoint python \
+  -e PYTHONPATH=/app -e DATABASE_URL= -e FA_API_TOKEN= -e GEMINI_API_KEY= \
+  -e ALPHA_VANTAGE_API_KEY= -e FINNHUB_API_KEY= -e TELEGRAM_BOT_TOKEN= \
+  -e TELEGRAM_CHAT_ID= \
+  -v "$PWD/tests:/app/tests:ro" -v "$PWD/pytest.ini:/app/pytest.ini:ro" \
+  -v "$PWD/scripts:/app/scripts:ro" -v "$PWD/fa:/app/fa:ro" \
+  -w /tmp dashboard -m pytest -c /app/pytest.ini --rootdir=/app /app/tests
 ```
+
+Al 2026-09-01 eso da **882 pasan, 5 skipped**.
+
+Cada pieza rara está por un motivo, y sacarla rompe algo:
+
+- **Blanquear las siete variables no es opcional.** El contenedor hereda el
+  `.env`; con `FA_API_TOKEN` puesto la API arranca en modo token, el
+  `TestClient` de FastAPI se come un 401 y **182 tests fallan** por algo que no
+  tiene nada que ver con el cambio que estés probando.
+- **Montar `fa/` también.** La imagen lo trae horneado, así que sin el montaje
+  estás probando el código de la última build, no el del working tree. Falla de
+  una forma muy confusa: el módulo nuevo "no existe".
+- **`-w /tmp`** porque `/app` es del root y pytest no puede escribir su caché.
+- **No pasar `-q`.** `pytest.ini` ya lo trae; el segundo lo convierte en `-qq`,
+  que esconde la línea con los totales.
+
+### Postgres
+
+```bash
+docker compose --profile dev up -d postgres     # efímero, sin volumen
+# ...el mismo comando de arriba, más:
+#   -e FA_TEST_DATABASE_URL=postgresql://fa:fa@postgres:5432/fa_test
+docker compose --profile dev down postgres      # apagalo cuando terminás
+```
+
+Da **887 pasan** — los 5 que SQLite saltea, más los que sólo corren ahí.
+
+El servicio `postgres` del profile `dev` es descartable y existe para esto. **No
+apuntar la suite al contenedor `db`**: ese es el de producción, con otras
+credenciales y con los datos reales del dueño.
 
 La variable es **`FA_TEST_DATABASE_URL`**, no `DATABASE_URL`. Con la equivocada
 la suite corre en SQLite en silencio y parece que pasó en los dos motores.
 
-`ruff` tiene una línea base de errores preexistentes: no la aumentes. Comparar
-antes y después, no apuntar a cero.
+### Lint
+
+`ruff` **no está instalado**: ni en el servidor, ni en la imagen, ni en
+`requirements.txt`. La regla sigue siendo *no aumentar la línea base de errores
+preexistentes* —comparar antes y después, no apuntar a cero— pero hoy no se
+puede medir acá. Si lo corrés en otra máquina, esa regla vale; si no, decí que
+no lo pudiste verificar en vez de dar por sentado que está bien.
 
 **Nunca probar contra la base real del usuario.** Copiar a un descartable y
 apuntar `FA_DB_PATH` ahí.
